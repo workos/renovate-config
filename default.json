@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "WorkOS shared Renovate preset. Hardens GitHub Actions usage with SHA-pinned digests, a 7-day minimum release age, and grouped/automerged minor & patch updates. See README for details.",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "minimumReleaseAge": "7 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "internalChecksFilter": "strict",
+  "timezone": "America/New_York",
+  "rebaseWhen": "conflicted",
+  "packageRules": [
+    {
+      "description": "Group and automerge non-major (digest/pinDigest/minor/patch) GitHub Actions updates.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest", "pinDigest", "minor", "patch"],
+      "groupName": "github-actions non-major",
+      "groupSlug": "github-actions-non-major",
+      "automerge": true
+    },
+    {
+      "description": "Major GitHub Actions updates require human review.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "github-actions major",
+      "groupSlug": "github-actions-major",
+      "automerge": false
+    }
+  ]
+}
