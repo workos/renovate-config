@@ -26,6 +26,13 @@
       "groupName": "github-actions major",
       "groupSlug": "github-actions-major",
       "automerge": false
+    },
+    {
+      "description": "Automerge patch updates for software dependencies after minimum release age.",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "addLabels": ["renovate/patch", "aviator/merge"]
     }
   ]
 }
