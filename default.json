@@ -11,6 +11,7 @@
   "internalChecksFilter": "strict",
   "timezone": "America/New_York",
   "rebaseWhen": "conflicted",
+  "dependencyDashboard": false,
   "packageRules": [
     {
       "description": "Group and automerge non-major (digest/pinDigest/minor/patch) GitHub Actions updates.",
