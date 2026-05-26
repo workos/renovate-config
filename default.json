@@ -30,6 +30,12 @@
       "automerge": false
     },
     {
+      "description": "Disable major and minor updates for software dependencies — patch-only policy.",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
+    },
+    {
       "description": "Automerge patch updates for software dependencies after minimum release age.",
       "matchManagers": ["!github-actions"],
       "matchUpdateTypes": ["patch"],
