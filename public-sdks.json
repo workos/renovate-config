@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Preset for public SDK and library repositories. Automerges minor and patch dependency updates, runs on a monthly schedule, and groups GitHub Actions updates.",
+  "extends": [
+    "github>workos/renovate-config"
+  ],
+  "dependencyDashboard": false,
+  "schedule": [
+    "on the 15th day of the month before 12pm"
+  ],
+  "timezone": "UTC",
+  "packageRules": [
+    {
+      "description": "Re-enable minor and major updates for all dependencies (overrides the default patch-only policy).",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": true
+    },
+    {
+      "description": "Automerge minor and patch dependency updates.",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "groupName": "minor and patch updates",
+      "addLabels": []
+    },
+    {
+      "description": "Major updates require human review.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
+    {
+      "description": "Digest-only updates require human review.",
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    }
+  ]
+}
