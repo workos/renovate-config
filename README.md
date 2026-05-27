@@ -9,7 +9,7 @@ Centralize dependency-management policy across the org so that a single edit pro
 | Preset | File | Best for |
 |--------|------|----------|
 | **Default** | `default.json` | Internal repositories with conservative update policies |
-| **Public SDKs** | `public-sdks.json` | Public SDK and library repositories |
+| **Public** | `public.json` | Public SDK and library repositories |
 
 ## Presets
 
@@ -24,7 +24,7 @@ The base preset that all WorkOS repositories can extend. It implements supply-ch
 - **Groups and auto-merges minor/patch/digest GitHub Actions updates** after CI passes. Major updates open a separate PR and require human review.
 - **Patch-only policy for software dependencies** — minor and major dependency updates are disabled. Patch updates are auto-merged after CI passes and the 7-day minimum age is met. Patch PRs are labeled `renovate/patch` and `aviator/merge` at creation time.
 
-### Public SDKs (`github>workos/renovate-config:public-sdks`)
+### Public (`github>workos/renovate-config:public`)
 
 Extends the default preset with a more permissive update policy suited for public SDK and library repositories:
 
@@ -53,7 +53,7 @@ In your repo's `renovate.json`:
 ```json
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>workos/renovate-config:public-sdks"]
+  "extends": ["github>workos/renovate-config:public"]
 }
 ```
 
