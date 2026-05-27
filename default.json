@@ -12,7 +12,6 @@
   "timezone": "America/New_York",
   "rebaseWhen": "conflicted",
   "reviewers": ["team:security"],
-  "dependencyDashboard": false,
   "packageRules": [
     {
       "description": "Group and automerge non-major (digest/pinDigest/minor/patch) GitHub Actions updates.",
@@ -29,6 +28,12 @@
       "groupName": "github-actions major",
       "groupSlug": "github-actions-major",
       "automerge": false
+    },
+    {
+      "description": "Disable major and minor updates for software dependencies — patch-only policy.",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
     },
     {
       "description": "Automerge patch updates for software dependencies after minimum release age.",
