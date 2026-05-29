@@ -40,7 +40,7 @@
       "matchManagers": ["!github-actions"],
       "matchUpdateTypes": ["patch"],
       "automerge": true,
-      "addLabels": ["renovate/patch", "aviator/merge"]
+      "addLabels": ["renovate/patch"]
     },
     {
       "description": "Skip internal/private Docker registries that Renovate cannot resolve (dhi.io and ghcr.io/workos).",
