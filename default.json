@@ -36,9 +36,11 @@
       "enabled": false
     },
     {
-      "description": "Automerge patch updates for software dependencies after minimum release age.",
+      "description": "Automerge patch updates for software dependencies after minimum release age. Group by dependency name so monorepos with version-consistency policies (e.g. Rush) get a single PR per dependency across all packages.",
       "matchManagers": ["!github-actions"],
       "matchUpdateTypes": ["patch"],
+      "groupName": "{{{depName}}}",
+      "groupSlug": "{{{depNameSanitized}}}",
       "automerge": true,
       "addLabels": ["renovate/patch"]
     },
