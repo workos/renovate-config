@@ -23,6 +23,7 @@ The base preset that all WorkOS repositories can extend. It implements supply-ch
 - **Suppresses branches for not-yet-eligible updates** (`internalChecksFilter: "strict"`) so the inbox stays quiet.
 - **Groups and auto-merges minor/patch/digest GitHub Actions updates** after CI passes. Major updates open a separate PR and require human review.
 - **Patch-only policy for software dependencies** — minor and major dependency updates are disabled. Patch updates are auto-merged after CI passes and the 7-day minimum age is met. Patch PRs are labeled `renovate/patch` and `aviator/merge` at creation time.
+- **Groups patch updates by dependency name** — all packages that use the same dependency are updated in a single PR. This ensures monorepos with version-consistency policies (e.g. Rush) pass lockfile validation. For single-package repos this is a no-op.
 
 ### Public (`github>workos/renovate-config:public`)
 
