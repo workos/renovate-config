@@ -10,6 +10,7 @@
   "minimumReleaseAgeBehaviour": "timestamp-required",
   "internalChecksFilter": "strict",
   "timezone": "America/New_York",
+  "schedule": ["* 0-6,21-23 * * 1-5", "* * * * 0,6"],
   "rebaseWhen": "conflicted",
   "reviewers": ["team:security"],
   "packageRules": [
