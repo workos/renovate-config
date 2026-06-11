@@ -10,7 +10,8 @@ jobs:
       pull-requests: write
     if: >
       github.event.pull_request.user.login == 'renovate[bot]' &&
-      contains(github.event.pull_request.labels.*.name, 'renovate/patch')
+      contains(github.event.pull_request.labels.*.name, 'renovate/patch') &&
+      !contains(github.event.pull_request.labels.*.name, 'renovate/major')
     steps:
       - name: Approve PR
         run: gh pr review "${{ github.event.pull_request.number }}" --approve --repo "${{ github.repository }}"
