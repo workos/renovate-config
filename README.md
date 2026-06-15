@@ -37,6 +37,7 @@ Extends the default preset with a more permissive update policy suited for publi
 - **Major updates require human review** — not auto-merged.
 - **Monthly schedule** — runs on the 15th of each month before 12pm UTC.
 - **No merge-queue labels** — does not add labels like `aviator/merge` since public repos typically merge PRs directly.
+- **Security/vulnerability PRs fire immediately** — overrides the base preset's after-hours constraint so security fixes are not delayed in public repos.
 
 ## How to use it
 
