@@ -35,7 +35,8 @@
       "matchUpdateTypes": [
         "major"
       ],
-      "automerge": false
+      "automerge": false,
+      "addLabels": ["renovate/major"]
     },
     {
       "matchUpdateTypes": [
@@ -66,7 +67,8 @@
       ],
       "groupName": "github actions major",
       "groupSlug": "github-actions-major",
-      "automerge": false
+      "automerge": false,
+      "addLabels": ["renovate/major"]
     }
   ]
 }
