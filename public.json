@@ -10,6 +10,10 @@
   ],
   "timezone": "UTC",
   "rebaseWhen": "conflicted",
+  "vulnerabilityAlerts": {
+    "description": "Restore Renovate's default immediate behavior for security PRs. The base preset constrains vulnerability alerts to an after-hours schedule, but public SDK repos should not delay security fixes.",
+    "schedule": []
+  },
   "packageRules": [
     {
       "matchManagers": [

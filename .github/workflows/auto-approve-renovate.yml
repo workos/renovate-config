@@ -1,4 +1,4 @@
-name: Auto-approve Renovate patch PRs
+name: Auto-approve Renovate PRs
 
 on:
   workflow_call:
@@ -10,7 +10,8 @@ jobs:
       pull-requests: write
     if: >
       github.event.pull_request.user.login == 'renovate[bot]' &&
-      contains(github.event.pull_request.labels.*.name, 'renovate/patch') &&
+      (contains(github.event.pull_request.labels.*.name, 'renovate/patch')
+        || contains(github.event.pull_request.labels.*.name, 'renovate/minor')) &&
       !contains(github.event.pull_request.labels.*.name, 'renovate/major')
     steps:
       - name: Approve PR
