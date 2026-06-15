@@ -25,6 +25,7 @@ The base preset that all WorkOS repositories can extend. It implements supply-ch
 - **Patch-only policy for software dependencies by default** — minor and major dependency updates are disabled in the base preset. Patch updates are auto-merged after CI passes and the 7-day minimum age is met. Patch PRs are labeled `renovate/patch` at creation time. Consuming repos can override this to enable minor updates (see [Enabling minor updates](#enabling-minor-updates)).
 - **Groups patch updates by dependency name** — all packages that use the same dependency are updated in a single PR. This ensures monorepos with version-consistency policies (e.g. Rush) pass lockfile validation. For single-package repos this is a no-op.
 - **After-hours schedule** — Renovate only runs outside business hours for both US coasts: weekdays 9 PM–7 AM Eastern (6 PM–4 AM Pacific), and all day on weekends. The weekend window closes at 7 AM ET Monday.
+- **Security/vulnerability PRs follow the same schedule** — Renovate's built-in default creates vulnerability-fix PRs immediately (`schedule: []`), bypassing any configured schedule. This preset overrides that default so security PRs are only opened during the same after-hours window as regular updates.
 
 ### Public (`github>workos/renovate-config:public`)
 
@@ -36,6 +37,7 @@ Extends the default preset with a more permissive update policy suited for publi
 - **Major updates require human review** — not auto-merged.
 - **Monthly schedule** — runs on the 15th of each month before 12pm UTC.
 - **No merge-queue labels** — does not add labels like `aviator/merge` since public repos typically merge PRs directly.
+- **Security/vulnerability PRs fire immediately** — overrides the base preset's after-hours constraint so security fixes are not delayed in public repos.
 
 ## How to use it
 
