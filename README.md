@@ -22,7 +22,7 @@ The base preset that all WorkOS repositories can extend. It implements supply-ch
 - **Treats missing release timestamps as "not yet eligible"** (`minimumReleaseAgeBehaviour: "timestamp-required"`) — the safer default introduced in Renovate 42.
 - **Suppresses branches for not-yet-eligible updates** (`internalChecksFilter: "strict"`) so the inbox stays quiet.
 - **Groups and auto-merges minor/patch/digest GitHub Actions updates** after CI passes. Major updates open a separate PR and require human review.
-- **Patch-only policy for software dependencies** — minor and major dependency updates are disabled. Patch updates are auto-merged after CI passes and the 7-day minimum age is met. Patch PRs are labeled `renovate/patch` and `aviator/merge` at creation time.
+- **Patch-only policy for software dependencies by default** — minor and major dependency updates are disabled in the base preset. Patch updates are auto-merged after CI passes and the 7-day minimum age is met. Patch PRs are labeled `renovate/patch` at creation time. Consuming repos can override this to enable minor updates (see [Enabling minor updates](#enabling-minor-updates)).
 - **Groups patch updates by dependency name** — all packages that use the same dependency are updated in a single PR. This ensures monorepos with version-consistency policies (e.g. Rush) pass lockfile validation. For single-package repos this is a no-op.
 - **After-hours schedule** — Renovate only runs outside business hours for both US coasts: weekdays 9 PM–7 AM Eastern (6 PM–4 AM Pacific), and all day on weekends. The weekend window closes at 7 AM ET Monday.
 
@@ -80,7 +80,7 @@ For most repos, extending a preset is sufficient — Renovate will open and merg
 Repos that use Aviator as their merge queue require an additional step, because Aviator enforces a minimum approval count before queuing a PR. For those repos, add a small workflow that calls the shared auto-approve workflow hosted here. Create `.github/workflows/renovate-auto-approve.yml` in your repo:
 
 ```yaml
-name: Auto-approve Renovate patch PRs
+name: Auto-approve Renovate PRs
 
 on:
   pull_request:
@@ -93,7 +93,30 @@ jobs:
       pull-requests: write
 ```
 
-This workflow approves any PR opened by `renovate[bot]` that carries the `renovate/patch` label, satisfying Aviator's approval precondition. Aviator then queues the PR once CI passes.
+This workflow approves any PR opened by `renovate[bot]` that carries the `renovate/patch` or `renovate/minor` label, satisfying Aviator's approval precondition. Aviator then queues the PR once CI passes.
+
+## Enabling minor updates
+
+The default preset disables minor (and major) updates for software dependencies. To opt in to automerged minor updates in a consuming repo, add a `packageRules` entry that re-enables them **and** labels the PRs so the auto-approve workflow fires:
+
+```json
+{
+  "packageRules": [
+    {
+      "description": "Enable and automerge minor updates, grouped by dependency name.",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["minor"],
+      "enabled": true,
+      "groupName": "{{{depName}}}",
+      "groupSlug": "{{{depNameSanitized}}}",
+      "automerge": true,
+      "addLabels": ["renovate/minor"]
+    }
+  ]
+}
+```
+
+The `addLabels: ["renovate/minor"]` is required — without it the auto-approve workflow's label check will never match and PRs will sit without approval.
 
 ## Prerequisites
 
