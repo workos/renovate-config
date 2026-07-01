@@ -48,6 +48,10 @@ jobs:
         with:
           configurationFile: .github/renovate-global-config.js
           token: ${{ steps.app-token.outputs.token }}
+          # Extend the default env-regex to forward Socket Firewall vars
+          # into the Docker container. Default only matches RENOVATE_*,
+          # LOG_LEVEL, GITHUB_COM_TOKEN, NODE_OPTIONS, and proxy vars.
+          env-regex: "^(?:RENOVATE_\\w+|LOG_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|(?:HTTPS?|NO)_PROXY|(?:https?|no)_proxy|NPM_CONFIG_REGISTRY|SOCKET_FIREWALL_TOKEN)$"
         env:
           RENOVATE_DRY_RUN: ${{ inputs.dry-run }}
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
