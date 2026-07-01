@@ -47,3 +47,8 @@ jobs:
         env:
           RENOVATE_DRY_RUN: ${{ inputs.dry-run }}
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
+          # Socket Firewall: postUpgradeTasks (rush update) needs these
+          # to route npm installs through the firewall, matching the
+          # env that renovate-lockfile-update.yml previously provided.
+          NPM_CONFIG_REGISTRY: https://socket-firewall.workos.dev/
+          SOCKET_FIREWALL_TOKEN: ${{ secrets.SOCKET_FIREWALL_TOKEN }}
