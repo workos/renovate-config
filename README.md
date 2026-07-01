@@ -140,6 +140,7 @@ The self-hosted runner is a scheduled GitHub Actions workflow in this repository
 **Required secrets (in this repo's Actions settings):**
 - `RENOVATE_APP_PRIVATE_KEY` — private key for the GitHub App used by the runner
 - `RENOVATE_APP_ID` — GitHub App ID (stored as a variable, not a secret)
+- `SOCKET_FIREWALL_TOKEN` — token for the Socket Firewall npm registry proxy
 
 **Adding a repo to the self-hosted runner:**
 1. Add the repo to `repositories` in `.github/renovate-global-config.js`
