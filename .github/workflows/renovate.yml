@@ -2,8 +2,13 @@ name: Self-hosted Renovate
 
 on:
   schedule:
-    # Every 4 hours, aligned with the after-hours window in default.json.
-    - cron: "0 */4 * * *"
+    # Fire hourly, on the hour. GitHub Actions cron is UTC-only and not
+    # DST-aware, so we do NOT try to encode the after-hours window here.
+    # Instead, Renovate's own `schedule` in default.json
+    # ("America/New_York" weekday nights 21:00-07:00 + weekends) is the
+    # authoritative, timezone-aware gate: runs that fire outside that
+    # window discover no in-schedule work and exit almost immediately.
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       dry-run:
