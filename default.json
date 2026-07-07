@@ -13,9 +13,12 @@
   "schedule": ["* 0-6,21-23 * * 1-5", "* * * * 0,6"],
   "rebaseWhen": "conflicted",
   "reviewers": ["team:security"],
+  "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
-    "description": "Constrain security-fix PRs to the same schedule as regular updates. Renovate's built-in default is schedule:[] (any time), which causes vulnerability-fix PRs to be opened and merged outside the designated time window.",
-    "schedule": ["* 0-6,21-23 * * 1-5", "* * * * 0,6"]
+    "description": "Prioritize security fixes ahead of regular updates while keeping them within the after-hours window. `schedule` still constrains them to the same time window as regular updates (Renovate's default is schedule:[] / any time). `prConcurrentLimit`/`prHourlyLimit: 0` exempt security PRs from the per-repo rate/concurrency caps (e.g. the monorepo's 1/hr open + 10 concurrent), so a vulnerability fix is created immediately and never queued behind throttled regular dependency PRs. (`prPriority` is not accepted inside `vulnerabilityAlerts`, and Renovate has no packageRules matcher for vulnerability status, so the limit exemption is the available lever.)",
+    "schedule": ["* 0-6,21-23 * * 1-5", "* * * * 0,6"],
+    "prConcurrentLimit": 0,
+    "prHourlyLimit": 0
   },
   "packageRules": [
     {
