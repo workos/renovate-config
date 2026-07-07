@@ -1,0 +1,67 @@
+name: Self-hosted Renovate
+
+on:
+  schedule:
+    # Fire hourly, on the hour. GitHub Actions cron is UTC-only and not
+    # DST-aware, so we do NOT try to encode the after-hours window here.
+    # Instead, Renovate's own `schedule` in default.json
+    # ("America/New_York" weekday nights 21:00-07:00 + weekends) is the
+    # authoritative, timezone-aware gate: runs that fire outside that
+    # window discover no in-schedule work and exit almost immediately.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry-run mode: 'full' logs what would happen without changes, 'lookup' creates branches but not PRs, empty string runs normally."
+        type: choice
+        options:
+          - ""
+          - full
+          - lookup
+        default: ""
+      log-level:
+        description: "Renovate log level"
+        type: choice
+        options:
+          - info
+          - debug
+        default: info
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    runs-on: depot-ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RENOVATE_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          owner: workos
+          repositories: workos
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - uses: renovatebot/github-action@6d859fc95779be83a0335ca704879b47e5d79641  # v46.1.16
+        with:
+          configurationFile: .github/renovate-global-config.js
+          token: ${{ steps.app-token.outputs.token }}
+          # Extend the default env-regex to forward Socket Firewall vars
+          # into the Docker container. Default only matches RENOVATE_*,
+          # LOG_LEVEL, GITHUB_COM_TOKEN, NODE_OPTIONS, and proxy vars.
+          env-regex: "^(?:RENOVATE_\\w+|LOG_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|(?:HTTPS?|NO)_PROXY|(?:https?|no)_proxy|NPM_CONFIG_REGISTRY|SOCKET_FIREWALL_TOKEN)$"
+        env:
+          RENOVATE_DRY_RUN: ${{ inputs.dry-run }}
+          LOG_LEVEL: ${{ inputs.log-level || 'info' }}
+          # Socket Firewall: postUpgradeTasks (rush update) needs these
+          # to route npm installs through the firewall, matching the
+          # env that renovate-lockfile-update.yml previously provided.
+          NPM_CONFIG_REGISTRY: https://socket-firewall.workos.dev/
+          SOCKET_FIREWALL_TOKEN: ${{ secrets.SOCKET_FIREWALL_TOKEN }}

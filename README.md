@@ -122,7 +122,37 @@ The `addLabels: ["renovate/minor"]` is required — without it the auto-approve 
 
 ## Prerequisites
 
-The [Mend Renovate GitHub App](https://github.com/apps/renovate) must be installed on your repo (or installed org-wide). Check at the [Mend dashboard](https://developer.mend.io/github/workos).
+Repositories are managed by one of two Renovate runners:
+
+| Runner | Repos | `postUpgradeTasks` | Setup |
+|--------|-------|--------------------|-------|
+| **Self-hosted** (`.github/workflows/renovate.yml`) | Listed in `.github/renovate-global-config.js` | Yes | See below |
+| **Mend Renovate GitHub App** | All other repos | No | [Install the app](https://github.com/apps/renovate) |
+
+### Self-hosted runner
+
+The self-hosted runner is a scheduled GitHub Actions workflow in this repository that runs the Renovate Docker container. It supports `postUpgradeTasks` (e.g. `rush update` for lockfile generation), which the Mend-hosted app cannot provide.
+
+**Configuration:**
+- `.github/workflows/renovate.yml` — the workflow definition (schedule, runner, auth)
+- `.github/renovate-global-config.js` — self-hosted global config (repo list, allowed commands)
+
+**Required secrets (in this repo's Actions settings):**
+- `RENOVATE_APP_PRIVATE_KEY` — private key for the GitHub App used by the runner
+- `RENOVATE_APP_ID` — GitHub App ID (stored as a variable, not a secret)
+- `SOCKET_FIREWALL_TOKEN` — token for the Socket Firewall npm registry proxy
+
+**Adding a repo to the self-hosted runner:**
+1. Add the repo to `repositories` in `.github/renovate-global-config.js`
+2. Remove the repo from the Mend Renovate GitHub App's installation (Settings → Integrations → GitHub Apps → Renovate → Configure → deselect the repo)
+3. If the repo needs post-upgrade commands, add the command regex to `allowedCommands` in the global config and add `postUpgradeTasks` to the repo's `renovate.json`
+
+**Manual trigger:**
+The workflow supports `workflow_dispatch` with optional dry-run and log-level inputs for testing.
+
+### Mend Renovate GitHub App
+
+For repos not yet migrated to self-hosted, the [Mend Renovate GitHub App](https://github.com/apps/renovate) must be installed on the repo (or installed org-wide). Check at the [Mend dashboard](https://developer.mend.io/github/workos).
 
 ## Changing the policy
 
