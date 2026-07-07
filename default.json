@@ -24,7 +24,8 @@
       "matchUpdateTypes": ["digest", "pinDigest", "minor", "patch"],
       "groupName": "github-actions non-major",
       "groupSlug": "github-actions-non-major",
-      "automerge": true
+      "automerge": true,
+      "addLabels": ["renovate/patch"]
     },
     {
       "description": "Major GitHub Actions updates require human review.",
