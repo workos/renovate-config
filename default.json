@@ -28,13 +28,10 @@
       "addLabels": ["renovate/patch"]
     },
     {
-      "description": "Major GitHub Actions updates require human review.",
+      "description": "Do not open major GitHub Actions updates. Major action bumps often carry breaking changes and must be performed manually.",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["major"],
-      "groupName": "github-actions major",
-      "groupSlug": "github-actions-major",
-      "automerge": false,
-      "addLabels": ["renovate/major"]
+      "enabled": false
     },
     {
       "description": "Disable major and minor updates for software dependencies — patch-only policy.",
