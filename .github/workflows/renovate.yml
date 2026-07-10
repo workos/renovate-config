@@ -37,7 +37,10 @@ permissions:
 jobs:
   renovate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Hard ceiling: the GitHub App installation token minted below expires
+    # after 60 minutes, so a longer run could not push or update PRs
+    # anyway. Never raise this above 60.
+    timeout-minutes: 60
     steps:
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3
         id: app-token
@@ -49,10 +52,48 @@ jobs:
 
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
+      - name: Write Socket Firewall .npmrc for postUpgradeTasks
+        env:
+          TOKEN: ${{ secrets.SOCKET_FIREWALL_TOKEN }}
+        run: |
+          # postUpgradeTasks run `rush update` inside the Renovate
+          # container. Rush's pnpm bootstrap spawns npm in a way that does
+          # NOT honor NPM_CONFIG_REGISTRY from the environment (npm falls
+          # through to its compile-time default of registry.npmjs.org), so
+          # an on-disk ~/.npmrc is the only mechanism that actually routes
+          # lockfile resolution through the Socket Firewall. Same approach
+          # as workos/workos .github/actions/check-socket-firewall-token.
+          # The file is bind-mounted into the container's HOME below.
+          # ignore-scripts: Renovate injects git credentials — including
+          # the GitHub App installation token — into every postUpgradeTasks
+          # child env (GIT_CONFIG_KEY/VALUE_*), which package lifecycle
+          # scripts would inherit. Disabling scripts means no third-party
+          # install code runs in-container at all. Lockfile output is
+          # unaffected: resolution doesn't run scripts, and pnpm's
+          # ignore-scripts does NOT disable .pnpmfile.cjs, so rush's
+          # pnpmfile shim still runs.
+          mkdir -p /tmp/renovate-home
+          {
+            echo "registry=https://socket-firewall.workos.dev/"
+            echo "//socket-firewall.workos.dev/:_authToken=${TOKEN}"
+            echo "ignore-scripts=true"
+          } > /tmp/renovate-home/.npmrc
+          # The container user (uid 12021) differs from the runner user;
+          # the file must be world-readable across the bind mount.
+          chmod 644 /tmp/renovate-home/.npmrc
+
       - uses: renovatebot/github-action@6d859fc95779be83a0335ca704879b47e5d79641  # v46.1.16
         with:
           configurationFile: .github/renovate-global-config.js
           token: ${{ steps.app-token.outputs.token }}
+          # Setting docker-volumes REPLACES the action's default value
+          # (/tmp:/tmp) rather than appending to it, so /tmp:/tmp is
+          # restated to keep Renovate's baseDir/cache under /tmp behaving
+          # as stock. (The config file is unaffected — the action mounts
+          # it separately at /github-action/.) The second mount drops the
+          # Socket Firewall .npmrc into the container user's HOME, where
+          # npm/pnpm spawned by postUpgradeTasks read it.
+          docker-volumes: "/tmp:/tmp;/tmp/renovate-home/.npmrc:/home/ubuntu/.npmrc"
           # Extend the default env-regex to forward Socket Firewall vars
           # into the Docker container. Default only matches RENOVATE_*,
           # LOG_LEVEL, GITHUB_COM_TOKEN, NODE_OPTIONS, and proxy vars.

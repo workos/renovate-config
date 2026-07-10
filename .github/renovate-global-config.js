@@ -8,6 +8,26 @@
 // defined in each repository's own renovate.json — this file only
 // governs the self-hosted runner itself.
 
+// postUpgradeTasks (in-container `rush update`) resolve packages through
+// the Socket Firewall via the ~/.npmrc bind-mounted by renovate.yml. If
+// the token is missing, that .npmrc would carry an empty authToken and
+// installs would fail with 401s — or, if the .npmrc write is ever
+// skipped, silently resolve via registry.npmjs.org and bypass the
+// firewall entirely (INFRA-5233). Refuse to run instead.
+if (!process.env.SOCKET_FIREWALL_TOKEN) {
+  // Renovate logs an Error thrown from a config file only at DEBUG level
+  // before dying with a generic "Error parsing config file" — print the
+  // real reason to stderr so it shows in the workflow log at any level.
+  console.error(
+    "FATAL: SOCKET_FIREWALL_TOKEN is not set. Refusing to run: rush " +
+      "lockfile updates would bypass the Socket Firewall (INFRA-5233)."
+  );
+  throw new Error(
+    "SOCKET_FIREWALL_TOKEN is not set. Refusing to run: rush lockfile " +
+      "updates would bypass the Socket Firewall (INFRA-5233)."
+  );
+}
+
 module.exports = {
   platform: "github",
 
@@ -18,6 +38,43 @@ module.exports = {
   // Commands that postUpgradeTasks may execute. Each entry is a
   // regex tested against the resolved command string.
   allowedCommands: [
+    // The slim renovate image has no npm on the exec PATH; install-tool
+    // installs node+npm in-container so install-run-rush can bootstrap.
+    // Pinned to an explicit version (not postUpgradeTasks.installTools)
+    // because branch-mode tasks resolve installTools with no version
+    // constraints — "latest stable node" would eventually jump past
+    // rush's hard `>=24.0.0 <25.0.0` range and break every lockfile
+    // update org-wide. Keep the version passed by workos/workos in sync
+    // with its .nvmrc.
+    "^install-tool node \\d+\\.\\d+\\.\\d+$",
     "^node common/scripts/install-run-rush\\.js update$",
   ],
+
+  // Per-command ceiling (minutes) for child processes Renovate execs,
+  // postUpgradeTasks included. The default is 15; 20 gives a cold
+  // in-container rush update headroom while keeping one branch's worst
+  // case (2 commands x 20 min) inside the 60-minute App-token/job
+  // window. Hung commands across SEVERAL branches can still hit the job
+  // timeout mid-run — that self-heals on the next hourly run.
+  executionTimeout: 20,
+
+  // Routing the token through `secrets` gets it redacted in Renovate's
+  // logs; customEnvVariables alone would print it at debug level.
+  secrets: {
+    SOCKET_FIREWALL_TOKEN: process.env.SOCKET_FIREWALL_TOKEN,
+  },
+
+  // Env forwarded to postUpgradeTasks child processes. Renovate strips
+  // the container env down to a fixed allowlist (PATH, HOME, CI,
+  // proxies, COREPACK_*, PNPM_*) — NODE_OPTIONS and NPM_CONFIG_* do NOT
+  // pass through on their own.
+  customEnvVariables: {
+    SOCKET_FIREWALL_TOKEN: "{{ secrets.SOCKET_FIREWALL_TOKEN }}",
+    // inngest-cli's postinstall spawns a download that can hang forever
+    // in headless environments.
+    SKIP_POSTINSTALL: "1",
+    // Parity with workos/workos verify-lockfile.yml — rush update on the
+    // monorepo needs the heap headroom.
+    NODE_OPTIONS: "--max-old-space-size=4096",
+  },
 };
