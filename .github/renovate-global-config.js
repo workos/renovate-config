@@ -28,6 +28,21 @@ if (!process.env.SOCKET_FIREWALL_TOKEN) {
   );
 }
 
+// Daytime debug mode. The night-only schedule makes pipeline changes cost
+// a full day per validation cycle. Setting the repo variable
+// RENOVATE_WORKFLOW_DEBUG to "true" (a) lets renovate.yml's half-hourly
+// cron firing through and (b) force-overrides the repo-level schedule
+// below so those runs do real work immediately. Set it back to "false"
+// when done — left on, it applies to night runs too.
+const debugMode = process.env.RENOVATE_WORKFLOW_DEBUG === "true";
+if (debugMode) {
+  console.error(
+    "RENOVATE_WORKFLOW_DEBUG=true — schedule override active: Renovate " +
+      "will open/update PRs at any time of day and the hourly PR-creation " +
+      "limit is lifted. Set the repo variable back to false after testing."
+  );
+}
+
 module.exports = {
   platform: "github",
 
@@ -77,4 +92,19 @@ module.exports = {
     // monorepo needs the heap headroom.
     NODE_OPTIONS: "--max-old-space-size=4096",
   },
+
+  // Debug-mode overrides must go through `force` — plain global config
+  // is only a default and loses to the repo-level preset (which is
+  // where the night-window schedule lives). prHourlyLimit 0 disables
+  // the per-hour PR-creation cap so each debug run can open work;
+  // prConcurrentLimit (10, repo config) still bounds open PRs. The
+  // 7-day minimum release age is deliberately NOT lifted.
+  ...(debugMode
+    ? {
+        force: {
+          schedule: ["at any time"],
+          prHourlyLimit: 0,
+        },
+      }
+    : {}),
 };

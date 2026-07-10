@@ -9,6 +9,12 @@ on:
     # authoritative, timezone-aware gate: runs that fire outside that
     # window discover no in-schedule work and exit almost immediately.
     - cron: "0 * * * *"
+    # Debug cadence: this firing is skipped by the job-level gate unless
+    # the repo variable RENOVATE_WORKFLOW_DEBUG is "true", which makes
+    # Renovate run every 30 minutes (and, via the env var below,
+    # override its night-window schedule) so the pipeline can be
+    # exercised during the workday.
+    - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
       dry-run:
@@ -36,6 +42,12 @@ permissions:
 
 jobs:
   renovate:
+    # The half-hour cron firing only proceeds in debug mode; the on-the-
+    # hour firing and manual dispatches always run.
+    if: >-
+      github.event_name != 'schedule' ||
+      github.event.schedule == '0 * * * *' ||
+      vars.RENOVATE_WORKFLOW_DEBUG == 'true'
     runs-on: ubuntu-latest
     # Hard ceiling: the GitHub App installation token minted below expires
     # after 60 minutes, so a longer run could not push or update PRs
@@ -106,3 +118,7 @@ jobs:
           # env that renovate-lockfile-update.yml previously provided.
           NPM_CONFIG_REGISTRY: https://socket-firewall.workos.dev/
           SOCKET_FIREWALL_TOKEN: ${{ secrets.SOCKET_FIREWALL_TOKEN }}
+          # Daytime debug switch — read by renovate-global-config.js
+          # inside the container (env-regex forwards RENOVATE_*). See the
+          # comments on the cron schedule above.
+          RENOVATE_WORKFLOW_DEBUG: ${{ vars.RENOVATE_WORKFLOW_DEBUG }}
