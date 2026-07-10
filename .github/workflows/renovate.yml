@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       dry-run:
-        description: "Dry-run mode: 'full' logs what would happen without changes, 'lookup' creates branches but not PRs, empty string runs normally."
+        description: "Dry-run mode: 'full' executes everything including in-container postUpgradeTasks but commits/pushes nothing; 'lookup' does dependency extraction + version lookups only (no branches, no PRs); empty string runs normally."
         type: choice
         options:
           - ""
@@ -98,6 +98,12 @@ jobs:
         with:
           configurationFile: .github/renovate-global-config.js
           token: ${{ steps.app-token.outputs.token }}
+          # Pinned: the action's default is the floating ghcr renovate:43
+          # tag, which drifts on every upstream 43.x publish — a mid-week
+          # Renovate regression would be indistinguishable from a config
+          # bug. Bump deliberately (this repo is not self-managed by
+          # Renovate, so bumps are manual).
+          renovate-version: 43.257.6
           # Setting docker-volumes REPLACES the action's default value
           # (/tmp:/tmp) rather than appending to it, so /tmp:/tmp is
           # restated to keep Renovate's baseDir/cache under /tmp behaving
