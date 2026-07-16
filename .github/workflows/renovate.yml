@@ -9,10 +9,16 @@ on:
     # authoritative, timezone-aware gate: runs that fire outside that
     # window discover no in-schedule work and exit almost immediately.
     - cron: "0 * * * *"
+    # Debug cadence: this firing is skipped by the job-level gate unless
+    # the repo variable RENOVATE_WORKFLOW_DEBUG is "true", which makes
+    # Renovate run every 30 minutes (and, via the env var below,
+    # override its night-window schedule) so the pipeline can be
+    # exercised during the workday.
+    - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
       dry-run:
-        description: "Dry-run mode: 'full' logs what would happen without changes, 'lookup' creates branches but not PRs, empty string runs normally."
+        description: "Dry-run mode: 'full' executes everything including in-container postUpgradeTasks but commits/pushes nothing; 'lookup' does dependency extraction + version lookups only (no branches, no PRs); empty string runs normally."
         type: choice
         options:
           - ""
@@ -36,8 +42,17 @@ permissions:
 
 jobs:
   renovate:
+    # The half-hour cron firing only proceeds in debug mode; the on-the-
+    # hour firing and manual dispatches always run.
+    if: >-
+      github.event_name != 'schedule' ||
+      github.event.schedule == '0 * * * *' ||
+      vars.RENOVATE_WORKFLOW_DEBUG == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Hard ceiling: the GitHub App installation token minted below expires
+    # after 60 minutes, so a longer run could not push or update PRs
+    # anyway. Never raise this above 60.
+    timeout-minutes: 60
     steps:
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3
         id: app-token
@@ -49,10 +64,54 @@ jobs:
 
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
+      - name: Write Socket Firewall .npmrc for postUpgradeTasks
+        env:
+          TOKEN: ${{ secrets.SOCKET_FIREWALL_TOKEN }}
+        run: |
+          # postUpgradeTasks run `rush update` inside the Renovate
+          # container. Rush's pnpm bootstrap spawns npm in a way that does
+          # NOT honor NPM_CONFIG_REGISTRY from the environment (npm falls
+          # through to its compile-time default of registry.npmjs.org), so
+          # an on-disk ~/.npmrc is the only mechanism that actually routes
+          # lockfile resolution through the Socket Firewall. Same approach
+          # as workos/workos .github/actions/check-socket-firewall-token.
+          # The file is bind-mounted into the container's HOME below.
+          # ignore-scripts: Renovate injects git credentials — including
+          # the GitHub App installation token — into every postUpgradeTasks
+          # child env (GIT_CONFIG_KEY/VALUE_*), which package lifecycle
+          # scripts would inherit. Disabling scripts means no third-party
+          # install code runs in-container at all. Lockfile output is
+          # unaffected: resolution doesn't run scripts, and pnpm's
+          # ignore-scripts does NOT disable .pnpmfile.cjs, so rush's
+          # pnpmfile shim still runs.
+          mkdir -p /tmp/renovate-home
+          {
+            echo "registry=https://socket-firewall.workos.dev/"
+            echo "//socket-firewall.workos.dev/:_authToken=${TOKEN}"
+            echo "ignore-scripts=true"
+          } > /tmp/renovate-home/.npmrc
+          # The container user (uid 12021) differs from the runner user;
+          # the file must be world-readable across the bind mount.
+          chmod 644 /tmp/renovate-home/.npmrc
+
       - uses: renovatebot/github-action@6d859fc95779be83a0335ca704879b47e5d79641  # v46.1.16
         with:
           configurationFile: .github/renovate-global-config.js
           token: ${{ steps.app-token.outputs.token }}
+          # Pinned: the action's default is the floating ghcr renovate:43
+          # tag, which drifts on every upstream 43.x publish — a mid-week
+          # Renovate regression would be indistinguishable from a config
+          # bug. Bump deliberately (this repo is not self-managed by
+          # Renovate, so bumps are manual).
+          renovate-version: 43.257.6
+          # Setting docker-volumes REPLACES the action's default value
+          # (/tmp:/tmp) rather than appending to it, so /tmp:/tmp is
+          # restated to keep Renovate's baseDir/cache under /tmp behaving
+          # as stock. (The config file is unaffected — the action mounts
+          # it separately at /github-action/.) The second mount drops the
+          # Socket Firewall .npmrc into the container user's HOME, where
+          # npm/pnpm spawned by postUpgradeTasks read it.
+          docker-volumes: "/tmp:/tmp;/tmp/renovate-home/.npmrc:/home/ubuntu/.npmrc"
           # Extend the default env-regex to forward Socket Firewall vars
           # into the Docker container. Default only matches RENOVATE_*,
           # LOG_LEVEL, GITHUB_COM_TOKEN, NODE_OPTIONS, and proxy vars.
@@ -65,3 +124,7 @@ jobs:
           # env that renovate-lockfile-update.yml previously provided.
           NPM_CONFIG_REGISTRY: https://socket-firewall.workos.dev/
           SOCKET_FIREWALL_TOKEN: ${{ secrets.SOCKET_FIREWALL_TOKEN }}
+          # Daytime debug switch — read by renovate-global-config.js
+          # inside the container (env-regex forwards RENOVATE_*). See the
+          # comments on the cron schedule above.
+          RENOVATE_WORKFLOW_DEBUG: ${{ vars.RENOVATE_WORKFLOW_DEBUG }}

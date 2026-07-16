@@ -14,8 +14,9 @@
   "rebaseWhen": "conflicted",
   "reviewers": ["team:security"],
   "vulnerabilityAlerts": {
-    "description": "Constrain security-fix PRs to the same schedule as regular updates. Renovate's built-in default is schedule:[] (any time), which causes vulnerability-fix PRs to be opened and merged outside the designated time window.",
-    "schedule": ["* 0-6,21-23 * * 1-5", "* * * * 0,6"]
+    "description": "Constrain security-fix PRs to the same schedule as regular updates (Renovate's built-in default is schedule:[] — any time) and to the same 7-day minimum release age (built-in default is minimumReleaseAge:null — propose immediately). The age constraint matters because pnpm's minimum-release-age in workos/workos common/config/rush/.npmrc refuses to install versions younger than 7 days regardless of what Renovate proposes: a security PR for a fresher fix is guaranteed to fail its lockfile update until the version ages. Aligning the gates means the PR is only opened once it is actually installable.",
+    "schedule": ["* 0-6,21-23 * * 1-5", "* * * * 0,6"],
+    "minimumReleaseAge": "7 days"
   },
   "packageRules": [
     {
