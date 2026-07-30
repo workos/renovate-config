@@ -239,9 +239,9 @@ def parse_stamp(stamp: str) -> dt.datetime:
 def load_allowlist(path: str) -> dict[str, str]:
     """Read `owner/repo: reason` lines from the allowlist file.
 
-    Deliberately parsed by hand rather than with PyYAML so the action needs no
-    dependencies beyond the Python that every GitHub runner already ships.
-    Comments and blank lines are ignored; anything else must be `key: reason`.
+    Read line by line rather than as YAML because the format is one line per
+    exemption and the reason is free text; comments and blank lines are ignored,
+    and anything else must be `key: reason`.
     """
     allow: dict[str, str] = {}
     if not path or not os.path.exists(path):
