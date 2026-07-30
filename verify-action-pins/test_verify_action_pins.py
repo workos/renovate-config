@@ -16,10 +16,10 @@ import unittest
 import unittest.mock
 
 from verify_action_pins import (
-    USES,
     GitHub,
     Unverifiable,
     changed_files,
+    uses_in_line,
     verify_ref,
 )
 
@@ -240,30 +240,32 @@ class ChangedFilesTest(unittest.TestCase):
         self.assertIn("other.yml", changed_files("main", ["."]))
 
 
-class UsesPatternTest(unittest.TestCase):
-    def parse(self, line: str):
-        m = USES.match(line)
-        return (m.group("ref"), m.group("comment")) if m else None
+class UsesScanTest(unittest.TestCase):
+    """Every YAML form the scanner misses is an unchecked executable action."""
 
     def test_forms_of_uses_line(self):
         cases = [
-            ("      - uses: o/r@sha # v1.2.3\n", ("o/r@sha", "v1.2.3")),
-            ("        uses: 'o/r@sha'  # v1.2.3 (comment)\n", ("o/r@sha", "v1.2.3 (comment)")),
-            ("      - uses: o/r@sha\n", ("o/r@sha", None)),
-            ("      - uses: docker://alpine:3\n", ("docker://alpine:3", None)),
-            # Quoted keys are valid YAML; a scanner that skipped them would let
-            # an unpinned action through while still reporting green.
-            ("      - 'uses': o/r@main\n", ("o/r@main", None)),
-            ('      - "uses" : o/r@main\n', ("o/r@main", None)),
+            ("      - uses: o/r@sha # v1.2.3\n", [("o/r@sha", "v1.2.3")]),
+            ("        uses: 'o/r@sha'  # v1.2.3 (comment)\n", [("o/r@sha", "v1.2.3 (comment)")]),
+            ("      - uses: o/r@sha\n", [("o/r@sha", None)]),
+            ("      - uses: docker://alpine:3\n", [("docker://alpine:3", None)]),
+            # Quoted keys and flow mappings are valid YAML that Actions runs.
+            ("      - 'uses': o/r@main\n", [("o/r@main", None)]),
+            ('      - "uses" : o/r@main\n', [("o/r@main", None)]),
+            ("      - {uses: o/r@main}\n", [("o/r@main", None)]),
+            ("      - { uses: o/r@main, with: {a: b} }\n", [("o/r@main", None)]),
+            ("    steps: [{uses: a/b@main}, {uses: c/d@main}]\n",
+             [("a/b@main", None), ("c/d@main", None)]),
         ]
         for line, expected in cases:
             with self.subTest(line=line):
-                self.assertEqual(self.parse(line), expected)
+                self.assertEqual(uses_in_line(line), expected)
 
     def test_non_uses_lines_ignored(self):
-        for line in ("        with:\n", "        # uses: o/r@v1\n", "          image: o/r@sha\n"):
+        for line in ("        with:\n", "        # uses: o/r@v1\n", "          image: o/r@sha\n",
+                     "          reuses: o/r@sha\n"):
             with self.subTest(line=line):
-                self.assertIsNone(self.parse(line))
+                self.assertEqual(uses_in_line(line), [])
 
 
 if __name__ == "__main__":

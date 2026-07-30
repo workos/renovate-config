@@ -64,12 +64,19 @@ from dataclasses import dataclass, field
 
 API = "https://api.github.com"
 
-# `uses: owner/repo[/path]@ref  # comment`, with the key optionally quoted --
-# `'uses': foo/bar@v1` is valid YAML, and a scanner that skipped it would let an
-# unpinned action through while still reporting green.
+# A `uses` key and its value, wherever in a line it appears. Deliberately not
+# anchored to the start of the line: YAML has more than one way to write a step,
+# and each form the scanner fails to recognise is an executable action it reports
+# nothing about --
+#
+#     - uses: owner/repo@ref     # block mapping
+#     - 'uses': owner/repo@ref   # quoted key
+#     - {uses: owner/repo@ref}   # flow mapping
+#
+# The value stops at whitespace, a quote, or a flow terminator, and `#` onwards
+# is handled by the caller so a commented-out line is not treated as a step.
 USES = re.compile(
-    r"^\s*(?:-\s*)?['\"]?uses['\"]?\s*:\s*['\"]?(?P<ref>[^\s'\"#]+)['\"]?"
-    r"(?:\s*#\s*(?P<comment>.*?))?\s*$"
+    r"(?<![\w./-])['\"]?uses['\"]?[ \t]*:[ \t]*['\"]?(?P<ref>[^\s'\",}\]]+)"
 )
 SHA = re.compile(r"^[0-9a-f]{40}$")
 SEMVER_TAG = re.compile(r"^v?\d+\.\d+\.\d+$")
@@ -261,6 +268,20 @@ def load_allowlist(path: str) -> dict[str, str]:
     return allow
 
 
+def uses_in_line(line: str) -> list[tuple[str, str | None]]:
+    """Every `(ref, pin comment)` a single line declares.
+
+    A flow sequence can put several steps on one line, so all matches count. The
+    line is split at `#` first: everything after it is a comment, which both
+    keeps a commented-out `uses:` from being read as a step and recovers the pin
+    comment Renovate writes.
+    """
+    code, sep, comment = line.partition("#")
+    trailing = comment.strip() if sep else None
+    refs = [m.group("ref") for m in USES.finditer(code)]
+    return [(ref, trailing if len(refs) == 1 else None) for ref in refs]
+
+
 def workflow_files(paths: list[str]) -> list[str]:
     found = []
     for root in paths:
@@ -416,14 +437,12 @@ def main() -> int:
     for path in files:
         with open(path, encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
-                m = USES.match(line)
-                if not m:
-                    continue
-                status, detail, tags = verify_ref(
-                    gh, m.group("ref"), min_age, allow, now,
-                    args.internal_owner, args.require_immutable,
-                )
-                findings.append(Finding(path, lineno, m.group("ref"), status, detail, tags))
+                for ref, _ in uses_in_line(line):
+                    status, detail, tags = verify_ref(
+                        gh, ref, min_age, allow, now,
+                        args.internal_owner, args.require_immutable,
+                    )
+                    findings.append(Finding(path, lineno, ref, status, detail, tags))
 
     failures = [f for f in findings if f.status == "fail"]
     for f in findings:
