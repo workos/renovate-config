@@ -116,6 +116,36 @@ jobs:
 
 This workflow approves any PR opened by `renovate[bot]` that carries the `renovate/patch` or `renovate/minor` label, satisfying Aviator's approval precondition. Aviator then queues the PR once CI passes.
 
+## Verifying action pins
+
+The preset can only age an update it has a timestamp for. A bare digest — a 40-character SHA — has none, which is why `digest` updates are not opened at all (see the table above). That leaves one thing Renovate cannot vouch for: the SHA a pin resolved to in the first place. `pin`/`pinDigest` freezes whatever `v4` pointed at when Renovate looked, and if that tag had been moved onto a malicious commit, the pin preserves it.
+
+`verify-action-pins` closes that from outside Renovate, using two facts a SHA alone doesn't give you:
+
+1. **Provenance** — the pinned SHA must be the exact target of a `vX.Y.Z` tag upstream. A commit no release tag points at is never something we meant to run.
+2. **Age** — that tag's release must have been published at least 7 days ago, measured by the release's `published_at`.
+
+`published_at` is assigned by GitHub at publish time and isn't settable through the REST API, which is why it's the anchor rather than commit metadata: `GIT_COMMITTER_DATE` lets anyone backdate a freshly pushed commit, so a commit date proves nothing. An attacker who moves a tag still cannot retroactively have published a release last week.
+
+Add it to a repo with:
+
+```yaml
+name: Verify action pins
+
+on:
+  pull_request:
+
+jobs:
+  action-pins:
+    uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@main
+```
+
+It reports as an ordinary status check, which is what makes it a usable automerge gate: Renovate won't merge a branch with a red status, so a pin whose release is younger than 7 days cannot land — and the check turns green by itself once the release ages, with no human step. Make it a required check to get the guarantee rather than the hint.
+
+The check fails closed — no tag match, no release, no timestamp, and API errors are all failures. A check that goes green when it can't see the data converts an unknown into a tick. Genuine exceptions go in `.github/action-pin-allowlist.yml` (one `owner/repo: reason` per line; see [the example](verify-action-pins/action-pin-allowlist.example.yml)), where they're explicit and reviewable. Two actions in use today need one: `dopplerhq/cli-action` (only `v3`/`v4` tags, no `vX.Y.Z` releases) and `rubygems/configure-rubygems-credentials` (non-semver tags).
+
+First-party `workos/*` references are skipped: they're covered by this check in the repository that owns them, and demanding a SHA for `workos/actions/...@main` would relocate the trust decision rather than strengthen it.
+
 ## Enabling minor updates
 
 The default preset disables minor (and major) updates for software dependencies. To opt in to automerged minor updates in a consuming repo, add a `packageRules` entry that re-enables them **and** labels the PRs so the auto-approve workflow fires:

@@ -1,0 +1,49 @@
+name: Verify action pins
+description: >-
+  Fail if any third-party `uses:` reference is not pinned to the SHA of a semver
+  release tag that has been published for at least a minimum age.
+
+inputs:
+  paths:
+    description: "Space-separated files or directories to scan."
+    required: false
+    default: ".github"
+  base:
+    description: >-
+      Only check files changed against this ref (e.g. the PR base). Leave empty
+      to scan every file under `paths`. A PR-scoped run needs the repository
+      checked out with enough history for `git merge-base` to resolve, so pass
+      `fetch-depth: 0` to actions/checkout when using this.
+    required: false
+    default: ""
+  min-age-days:
+    description: "Minimum age, in days, of the release behind a pinned SHA."
+    required: false
+    default: "7"
+  allowlist:
+    description: >-
+      Path to a file of `owner/repo: reason` exemptions. Missing file means no
+      exemptions.
+    required: false
+    default: ".github/action-pin-allowlist.yml"
+  token:
+    description: >-
+      Token used for GitHub API reads (tags and releases of third-party action
+      repositories). The default `GITHUB_TOKEN` is sufficient — only public read
+      access is needed — but it must be supplied, because unauthenticated API
+      access is rate-limited to 60 requests/hour and would make the check flap.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Verify action pins
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        python3 "${{ github.action_path }}/verify_action_pins.py" \
+          ${{ inputs.base && format('--base {0}', inputs.base) || '' }} \
+          --min-age-days "${{ inputs.min-age-days }}" \
+          --allowlist "${{ inputs.allowlist }}" \
+          ${{ inputs.paths }}

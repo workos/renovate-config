@@ -1,0 +1,70 @@
+name: Verify action pins
+
+# Reusable wrapper around verify-action-pins/action.yml, so a consuming repo can
+# adopt the check with a three-line caller instead of a checkout + action pair:
+#
+#   jobs:
+#     action-pins:
+#       uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@main
+#
+# Called on pull_request it reports as a normal status check, which is what makes
+# it usable as a required check and as an automerge gate: Renovate will not merge
+# a branch whose statuses are not green, so a pin whose release is younger than
+# `min-age-days` cannot land — and it turns green on its own once the release
+# ages, with no human step.
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        type: string
+        required: false
+        default: ".github"
+      base:
+        description: >-
+          Ref to diff against. Defaults to the PR base on pull_request events and
+          to empty (full scan) elsewhere.
+        type: string
+        required: false
+        default: ""
+      min-age-days:
+        type: string
+        required: false
+        default: "7"
+      allowlist:
+        type: string
+        required: false
+        default: ".github/action-pin-allowlist.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          # A PR-scoped run resolves `git merge-base HEAD <base>`, which needs
+          # history rather than the default single commit.
+          fetch-depth: 0
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          repository: workos/renovate-config
+          # Same-SHA as the caller's `uses:` would be preferable, but a reusable
+          # workflow cannot see the ref it was called with; `github.workflow_ref`
+          # is the caller's. main is acceptable here because this is a
+          # first-party repository whose changes go through review.
+          ref: main
+          path: .verify-action-pins
+          persist-credentials: false
+
+      - uses: ./.verify-action-pins/verify-action-pins
+        with:
+          paths: ${{ inputs.paths }}
+          base: ${{ inputs.base || (github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || '') }}
+          min-age-days: ${{ inputs.min-age-days }}
+          allowlist: ${{ inputs.allowlist }}
+          token: ${{ github.token }}
