@@ -37,14 +37,14 @@ on:
         default: ".github/action-pin-allowlist.yml"
       checker-ref:
         description: >-
-          Ref of workos/renovate-config to run the checker from. A reusable
-          workflow cannot see the ref it was called with (`github.workflow_ref`
-          is the caller's), so a caller that pins this workflow to a SHA should
-          pass the same SHA here to run exactly the reviewed implementation.
-          Defaults to main, which tracks this repository's default branch.
+          Ref of workos/renovate-config to run the checker from. Defaults to
+          `github.job_workflow_sha`, the commit of this workflow file itself, so
+          the implementation always matches the revision the caller asked for —
+          pin this workflow to a SHA and the checker runs from that same SHA.
+          Only set this to run a different revision on purpose.
         type: string
         required: false
-        default: "main"
+        default: ""
       require-immutable:
         type: string
         required: false
@@ -67,11 +67,13 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           repository: workos/renovate-config
-          # The implementation must be pinnable independently of this workflow:
-          # a caller that writes `...@<sha>` otherwise still executes whatever
-          # main holds, so a change here would run with the caller's token
-          # before anyone pinning a SHA had reviewed it.
-          ref: ${{ inputs.checker-ref }}
+          # The checker code must come from the same revision as this workflow
+          # file, or a caller writing `...@<sha>` would still execute whatever
+          # main holds — a change here running with the caller's token before
+          # anyone pinning a SHA had reviewed it. `job_workflow_sha` is the
+          # commit of the reusable workflow itself, which is exactly that
+          # revision; `main` is only a fallback for a runner that omits it.
+          ref: ${{ inputs.checker-ref || github.job_workflow_sha || 'main' }}
           path: .verify-action-pins
           persist-credentials: false
 
