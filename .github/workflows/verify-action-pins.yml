@@ -41,7 +41,8 @@ on:
           `github.job_workflow_sha`, the commit of this workflow file itself, so
           the implementation always matches the revision the caller asked for —
           pin this workflow to a SHA and the checker runs from that same SHA.
-          Only set this to run a different revision on purpose.
+          Set this only to run a different revision on purpose, or on a runner
+          that does not populate that context (where the job fails without it).
         type: string
         required: false
         default: ""
@@ -58,6 +59,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The checker code must come from the same revision as this workflow file,
+      # or a caller writing `...@<sha>` would still execute whatever main holds —
+      # a change here running with the caller's token before the person who
+      # pinned it had reviewed it. `job_workflow_sha` is the commit of the
+      # reusable workflow itself, which is exactly that revision. There is no
+      # fallback: a mutable default is the defect this resolves, so if the
+      # revision cannot be determined the job fails and says so.
+      - name: Resolve the checker revision
+        id: checker
+        shell: bash
+        env:
+          CHECKER_REF: ${{ inputs.checker-ref }}
+          WORKFLOW_SHA: ${{ github.job_workflow_sha }}
+        run: |
+          set -euo pipefail
+          ref="${CHECKER_REF:-$WORKFLOW_SHA}"
+          if [[ -z "$ref" ]]; then
+            echo "::error::Cannot tell which revision of the checker to run:" \
+              "github.job_workflow_sha is empty and checker-ref was not set." \
+              "Pass checker-ref explicitly."
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           # A PR-scoped run resolves `git merge-base HEAD <base>`, which needs
@@ -67,13 +92,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           repository: workos/renovate-config
-          # The checker code must come from the same revision as this workflow
-          # file, or a caller writing `...@<sha>` would still execute whatever
-          # main holds — a change here running with the caller's token before
-          # anyone pinning a SHA had reviewed it. `job_workflow_sha` is the
-          # commit of the reusable workflow itself, which is exactly that
-          # revision; `main` is only a fallback for a runner that omits it.
-          ref: ${{ inputs.checker-ref || github.job_workflow_sha || 'main' }}
+          ref: ${{ steps.checker.outputs.ref }}
           path: .verify-action-pins
           persist-credentials: false
 

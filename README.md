@@ -143,7 +143,7 @@ jobs:
     uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@main
 ```
 
-Pinning that `uses:` to a SHA is enough on its own. The implementation is a separate checkout — a reusable workflow can't run code from its own repository without one — and it defaults to `github.job_workflow_sha`, the commit of the workflow file being run, so pinning the caller pins the checker too. The `checker-ref` input exists only to run a different revision deliberately.
+Pinning that `uses:` to a SHA is enough on its own. The implementation is a separate checkout — a reusable workflow can't run code from its own repository without one — and it defaults to `github.job_workflow_sha`, the commit of the workflow file being run, so pinning the caller pins the checker too. The `checker-ref` input exists only to run a different revision deliberately; there's no `main` fallback, because a mutable default is the thing being avoided, so a runner that doesn't populate that context fails the job with an explicit message instead.
 
 It reports as an ordinary status check, which is what makes it a usable automerge gate: Renovate won't merge a branch with a red status, so a pin whose release is younger than 7 days cannot land — and the check turns green by itself once the release ages, with no human step. Make it a required check to get the guarantee rather than the hint.
 
