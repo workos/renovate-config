@@ -68,6 +68,7 @@ API = "https://api.github.com"
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 SEMVER_TAG = re.compile(r"^v?\d+\.\d+\.\d+$")
+DOCKER_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 # Reusable workflows and actions living in the caller's own repository are
 # resolved by git ref, not fetched from a third party, so pinning them to a SHA
@@ -354,8 +355,25 @@ def verify_ref(gh: GitHub, ref: str, min_age: dt.timedelta, allow: dict[str, str
                require_immutable: bool = False) -> tuple[str, str, list[str]]:
     """Classify a single `owner/repo[/path]@ref` reference."""
     target, _, pin = ref.partition("@")
-    if ref.startswith(LOCAL_PREFIXES) or ref.startswith("docker://") or not pin:
-        return "skip", "local or non-action reference", []
+    if ref.startswith(LOCAL_PREFIXES):
+        return "skip", "local reference", []
+    if ref.startswith("docker://"):
+        # A container step runs third-party code just as an action does, and
+        # `docker://image:tag` is as movable as a floating git tag. Release age
+        # is not a thing a registry can answer, but a digest is content-addressed
+        # and therefore cannot be retargeted, so that is what is required.
+        # Allowlisted by image name, without the tag: `registry/image: reason`.
+        image = target[len("docker://"):]
+        head, sep, tail = image.rpartition(":")
+        if sep and "/" not in tail:
+            image = head
+        if image in allow:
+            return "skip", f"allowlisted: {allow[image] or 'no reason given'}", []
+        if DOCKER_DIGEST.match(pin):
+            return "pass", "image pinned to a digest", []
+        return "fail", f"container image not digest-pinned (pinned to {pin or 'a tag'!r})", []
+    if not pin:
+        return "skip", "non-action reference", []
 
     # Sub-path actions (`actions/cache/restore`) live in their owner's repo, so
     # tags and releases must be looked up on `owner/repo`.

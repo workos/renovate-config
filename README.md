@@ -158,6 +158,8 @@ The check fails closed — no tag match, no release, no timestamp, no commit met
 
 Workflows are parsed as YAML rather than pattern-matched line by line, so every form Actions accepts is covered — flow mappings, quoted keys, a value on the next line, anchors — and a file that doesn't parse is a failure rather than a file with no findings. That needs PyYAML, which GitHub-hosted runners ship; the action installs it if a self-hosted runner doesn't.
 
+`docker://` container steps run third-party code the same way an action does, so a movable `:tag` fails; a `@sha256:...` digest passes, since a content-addressed image can't be retargeted (registries don't expose a release age to check, and the digest makes one unnecessary). Allowlist them by image name without the tag. No repo uses a `docker://` step today, so this costs nothing now and closes the gap before one does.
+
 First-party `workos/*` references are skipped: they're covered by this check in the repository that owns them, and demanding a SHA for `workos/actions/...@main` would relocate the trust decision rather than strengthen it.
 
 ## Enabling minor updates

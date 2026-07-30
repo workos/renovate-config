@@ -169,6 +169,22 @@ class VerifyRefTest(unittest.TestCase):
         status, _, _ = self.verify("./.github/actions/build")
         self.assertEqual(status, "skip")
 
+    def test_container_step_must_be_digest_pinned(self):
+        """A `docker://` step runs third-party code and a tag can be retargeted."""
+        digest = "sha256:" + "a" * 64
+        status, detail, _ = self.verify(f"docker://ghcr.io/o/img@{digest}")
+        self.assertEqual(status, "pass")
+        self.assertIn("digest", detail)
+
+        status, detail, _ = self.verify("docker://ghcr.io/o/img:3")
+        self.assertEqual(status, "fail")
+        self.assertIn("not digest-pinned", detail)
+
+        status, detail, _ = self.verify(
+            "docker://ghcr.io/o/img:3", allow={"ghcr.io/o/img": "built by us"})
+        self.assertEqual(status, "skip")
+        self.assertIn("built by us", detail)
+
     def test_subpath_action_resolves_against_owner_repo(self):
         status, _, _ = self.verify(f"o/r/sub/dir@{AGED_SHA}")
         self.assertEqual(status, "pass")
