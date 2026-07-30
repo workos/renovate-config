@@ -19,6 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
+      - run: python3 -m unittest discover -s verify-action-pins -t verify-action-pins
+
       - run: python3 verify-action-pins/verify_action_pins.py .github
         env:
           GITHUB_TOKEN: ${{ github.token }}

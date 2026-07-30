@@ -44,6 +44,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -90,6 +91,13 @@ class GitHub:
         self._cache: dict[str, object] = {}
 
     def get(self, path: str) -> object:
+        """GET an API path, retrying transient failures.
+
+        403 and 429 are GitHub's rate-limit responses and 5xx are transient; a
+        check that failed on those would flap red for reasons unrelated to the
+        pins it is verifying, and a flapping required check gets disabled. Only
+        a persistent failure is surfaced to the caller, which then fails closed.
+        """
         if path in self._cache:
             return self._cache[path]
         headers = {
@@ -100,39 +108,82 @@ class GitHub:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(f"{API}{path}", headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                body = json.load(resp)
-        except urllib.error.HTTPError as exc:
-            body = {"_error": f"HTTP {exc.code}"}
-        except Exception as exc:  # network/DNS/timeout -- still fail closed
-            body = {"_error": str(exc)}
+        body: object = {"_error": "not attempted"}
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    body = json.load(resp)
+                break
+            except urllib.error.HTTPError as exc:
+                body = {"_error": f"HTTP {exc.code}"}
+                transient = exc.code in (403, 429) or exc.code >= 500
+                if not transient:
+                    break
+                delay = self._retry_after(exc, attempt)
+            except Exception as exc:  # network/DNS/timeout
+                body = {"_error": str(exc)}
+                delay = 2 ** attempt
+            if attempt < 3:
+                time.sleep(delay)
         self._cache[path] = body
         return body
 
-    def semver_tags_at(self, repo: str, sha: str) -> list[str]:
+    @staticmethod
+    def _retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:
+        """Seconds to wait, preferring GitHub's own guidance to guesswork."""
+        for header in ("Retry-After", "X-RateLimit-Reset"):
+            value = exc.headers.get(header)
+            if not value:
+                continue
+            try:
+                seconds = float(value)
+            except ValueError:
+                continue
+            if header == "X-RateLimit-Reset":
+                seconds -= time.time()
+            # A primary-limit reset can be an hour out; waiting that long inside
+            # a check is worse than failing it, so cap and let the retry decide.
+            return max(1.0, min(seconds, 60.0))
+        return float(2 ** attempt)
+
+    def semver_tags_at(self, repo: str, sha: str, claimed: str | None = None) -> list[str]:
         """Semver tag names in `repo` whose target commit is `sha`.
 
-        Annotated tags point at a tag object rather than a commit, so those are
-        peeled one level to compare against the commit SHA a workflow pins.
+        The pin comment Renovate writes (`# v4.4.0`) is a hint about which tag to
+        look at, never evidence: it is checked by resolving that tag and
+        comparing its target to the pinned SHA. Starting there keeps the common
+        case at one or two API calls instead of walking a repository's whole tag
+        list, which for a busy action means hundreds of refs plus a peel request
+        for every annotated one.
         """
-        refs = self.get(f"/repos/{repo}/git/matching-refs/tags/")
-        if not isinstance(refs, list):
-            return []
+        if claimed and SEMVER_TAG.match(claimed):
+            ref = self.get(f"/repos/{repo}/git/ref/tags/{claimed}")
+            if isinstance(ref, dict) and self._peel(repo, ref.get("object", {})) == sha:
+                return [claimed]
+
+        # No usable comment, or it did not check out: fall back to the tag list,
+        # whose entries already carry the peeled commit SHA.
         out = []
-        for ref in refs:
-            name = ref.get("ref", "").removeprefix("refs/tags/")
-            if not SEMVER_TAG.match(name):
-                continue
-            obj = ref.get("object", {})
-            target = obj.get("sha")
-            if obj.get("type") == "tag":
-                peeled = self.get(f"/repos/{repo}/git/tags/{target}")
-                if isinstance(peeled, dict):
-                    target = peeled.get("object", {}).get("sha", target)
-            if target == sha:
-                out.append(name)
+        for page in range(1, 4):
+            tags = self.get(f"/repos/{repo}/tags?per_page=100&page={page}")
+            if not isinstance(tags, list) or not tags:
+                break
+            for tag in tags:
+                name = tag.get("name", "")
+                if SEMVER_TAG.match(name) and tag.get("commit", {}).get("sha") == sha:
+                    out.append(name)
+            if out or len(tags) < 100:
+                break
         return out
+
+    def _peel(self, repo: str, obj: dict) -> str | None:
+        """Commit SHA behind a ref object, resolving annotated tag objects."""
+        target = obj.get("sha")
+        if obj.get("type") == "tag":
+            peeled = self.get(f"/repos/{repo}/git/tags/{target}")
+            if isinstance(peeled, dict):
+                return peeled.get("object", {}).get("sha")
+        return target
 
     def release_published_at(self, repo: str, tag: str) -> tuple[dt.datetime | None, str]:
         rel = self.get(f"/repos/{repo}/releases/tags/{tag}")
@@ -192,7 +243,8 @@ def changed_files(base: str) -> list[str]:
 
 
 def verify_ref(gh: GitHub, ref: str, min_age: dt.timedelta, allow: dict[str, str],
-               now: dt.datetime, internal_owner: str | None = None) -> tuple[str, str, list[str]]:
+               now: dt.datetime, internal_owner: str | None = None,
+               claimed: str | None = None) -> tuple[str, str, list[str]]:
     """Classify a single `owner/repo[/path]@ref` reference."""
     target, _, pin = ref.partition("@")
     if ref.startswith(LOCAL_PREFIXES) or ref.startswith("docker://") or not pin:
@@ -217,7 +269,7 @@ def verify_ref(gh: GitHub, ref: str, min_age: dt.timedelta, allow: dict[str, str
     if not SHA.match(pin):
         return "fail", f"not SHA-pinned (pinned to {pin!r})", []
 
-    tags = gh.semver_tags_at(repo, pin)
+    tags = gh.semver_tags_at(repo, pin, claimed)
     if not tags:
         return "fail", "pinned SHA is not the target of any vX.Y.Z tag", []
 
@@ -262,8 +314,9 @@ def main() -> int:
                 if not m:
                     continue
                 ref = m.group("ref")
+                claimed = (m.group("comment") or "").split()[0] if m.group("comment") else None
                 status, detail, tags = verify_ref(
-                    gh, ref, min_age, allow, now, args.internal_owner
+                    gh, ref, min_age, allow, now, args.internal_owner, claimed
                 )
                 findings.append(Finding(path, lineno, ref, status, detail, tags))
 
