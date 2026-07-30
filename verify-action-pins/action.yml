@@ -26,6 +26,13 @@ inputs:
       exemptions.
     required: false
     default: ".github/action-pin-allowlist.yml"
+  require-immutable:
+    description: >-
+      Accept only immutable releases, whose tag provably cannot have been moved.
+      Stronger, but most upstream actions have not enabled immutable releases yet,
+      so it currently fails almost everything.
+    required: false
+    default: "false"
   token:
     description: >-
       Token used for GitHub API reads (tags and releases of third-party action
@@ -41,9 +48,25 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
+        # Inputs reach bash through the environment rather than by template
+        # substitution: a caller-supplied value interpolated into `run:` becomes
+        # shell source, so `paths: "; curl evil"` would execute in this job.
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_MIN_AGE_DAYS: ${{ inputs.min-age-days }}
+        INPUT_ALLOWLIST: ${{ inputs.allowlist }}
+        INPUT_REQUIRE_IMMUTABLE: ${{ inputs.require-immutable }}
+        SCRIPT: ${{ github.action_path }}/verify_action_pins.py
       run: |
-        python3 "${{ github.action_path }}/verify_action_pins.py" \
-          ${{ inputs.base && format('--base {0}', inputs.base) || '' }} \
-          --min-age-days "${{ inputs.min-age-days }}" \
-          --allowlist "${{ inputs.allowlist }}" \
-          ${{ inputs.paths }}
+        set -euo pipefail
+        args=(--min-age-days "$INPUT_MIN_AGE_DAYS" --allowlist "$INPUT_ALLOWLIST")
+        if [[ -n "$INPUT_BASE" ]]; then
+          args+=(--base "$INPUT_BASE")
+        fi
+        if [[ "$INPUT_REQUIRE_IMMUTABLE" == "true" ]]; then
+          args+=(--require-immutable)
+        fi
+        # `paths` is documented as space-separated, so word splitting here is
+        # intended -- but on a value that never reached the shell as code.
+        read -r -a paths <<< "$INPUT_PATHS"
+        python3 "$SCRIPT" "${args[@]}" "${paths[@]}"

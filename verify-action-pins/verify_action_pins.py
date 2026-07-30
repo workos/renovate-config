@@ -12,27 +12,40 @@ tell a commit published a year ago from one pushed a minute ago. That gap is
 exactly the tag-hijack shape SHA pinning is supposed to defend against: move
 `v4` onto a malicious commit, and anything that resolves `v4` adopts it.
 
-The check here closes the gap from outside Renovate, using two facts that a
-SHA alone does not give you:
+The check here closes the gap from outside Renovate, using facts that a SHA
+alone does not give you:
 
 1. **Provenance.** The pinned SHA must be the exact target of a semver tag
    (`vX.Y.Z`) in the upstream repository. A commit that no release tag points
    at is never something we intend to run, whatever its comment claims.
 2. **Age.** The release for that tag must have been published at least
    `--min-age-days` ago, measured by the release's `published_at`.
+3. **Binding.** The release must plausibly be *about* the pinned commit. A
+   semver tag is still a mutable ref: moving `v4.3.1` onto a fresh commit
+   satisfies (1) and inherits the old release's `published_at`, so age alone
+   would pass a commit created minutes ago. Two signals close that:
 
-`published_at` is assigned by GitHub when the release is published and is not
-settable through the REST API, which is why it is the anchor rather than commit
-metadata: `committer.date` is just a string in the commit object and
-`GIT_COMMITTER_DATE` lets an attacker backdate a freshly pushed commit to any
-date they like. An attacker who can move a tag still cannot retroactively have
-published a release last week.
+   * `immutable` on the release. GitHub's immutable releases (GA October 2025)
+     make the tag unmovable, so the timestamp genuinely describes the commit.
+     This is proof, and `--require-immutable` insists on it.
+   * Otherwise, the commit must not be newer than the release that supposedly
+     shipped it. A released commit predates its release; a commit that appears
+     *after* the release it claims means the tag moved. This is a consistency
+     check rather than proof -- `GIT_COMMITTER_DATE` lets an attacker backdate
+     a pushed commit -- so it raises the bar without being airtight. Detecting
+     a moved tag independently of upstream metadata needs a first-seen ledger
+     of `(action, tag) -> sha`, which is deliberately left to a later change.
 
-The check fails closed. No tag match, no release, no timestamp, or an API error
-all count as failures -- a check that silently passes when it cannot see the
-data is worse than no check, because it converts an unknown into a green tick.
-Genuine exceptions (an action that ships tags without releases, say) go in the
-allowlist file, where they are explicit and reviewable.
+`published_at` is the anchor rather than commit metadata because it is assigned
+by GitHub when the release is published and is not settable through the REST
+API, whereas `committer.date` is just a string in the commit object.
+
+The check fails closed. No tag match, no release, no timestamp, no commit
+metadata, an API error, or a git failure that leaves it unsure which files to
+inspect all count as failures -- a check that silently passes when it cannot see
+the data is worse than no check, because it converts an unknown into a green
+tick. Genuine exceptions (an action that ships tags without releases, say) go in
+the allowlist file, where they are explicit and reviewable.
 """
 
 from __future__ import annotations
@@ -51,10 +64,11 @@ from dataclasses import dataclass, field
 
 API = "https://api.github.com"
 
-# `uses: owner/repo[/path]@ref  # comment`. Anchored on the `uses:` key so that
-# `with:` values or prose mentioning an action are not picked up.
+# `uses: owner/repo[/path]@ref  # comment`, with the key optionally quoted --
+# `'uses': foo/bar@v1` is valid YAML, and a scanner that skipped it would let an
+# unpinned action through while still reporting green.
 USES = re.compile(
-    r"^\s*(?:-\s*)?uses:\s*['\"]?(?P<ref>[^\s'\"#]+)['\"]?"
+    r"^\s*(?:-\s*)?['\"]?uses['\"]?\s*:\s*['\"]?(?P<ref>[^\s'\"#]+)['\"]?"
     r"(?:\s*#\s*(?P<comment>.*?))?\s*$"
 )
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -64,6 +78,19 @@ SEMVER_TAG = re.compile(r"^v?\d+\.\d+\.\d+$")
 # resolved by git ref, not fetched from a third party, so pinning them to a SHA
 # would gain nothing and break `uses: ./.github/actions/foo` entirely.
 LOCAL_PREFIXES = ("./", "../")
+
+# A commit can carry a timestamp slightly after the release that ships it (clock
+# skew, or a release published from a tag created moments earlier), so the
+# "commit is not newer than its release" comparison needs a little slack.
+CLOCK_SKEW = dt.timedelta(hours=1)
+
+
+class Unverifiable(Exception):
+    """Raised when the data needed for a verdict cannot be obtained.
+
+    Distinct from a failed verdict: it means the check could not see enough to
+    judge, which must still surface as red rather than as a pass.
+    """
 
 
 @dataclass
@@ -89,6 +116,7 @@ class GitHub:
     def __init__(self, token: str | None) -> None:
         self.token = token
         self._cache: dict[str, object] = {}
+        self._tags: dict[str, dict[str, str]] = {}
 
     def get(self, path: str) -> object:
         """GET an API path, retrying transient failures.
@@ -116,8 +144,7 @@ class GitHub:
                 break
             except urllib.error.HTTPError as exc:
                 body = {"_error": f"HTTP {exc.code}"}
-                transient = exc.code in (403, 429) or exc.code >= 500
-                if not transient:
+                if not (exc.code in (403, 429) or exc.code >= 500):
                     break
                 delay = self._retry_after(exc, attempt)
             except Exception as exc:  # network/DNS/timeout
@@ -146,54 +173,72 @@ class GitHub:
             return max(1.0, min(seconds, 60.0))
         return float(2 ** attempt)
 
-    def semver_tags_at(self, repo: str, sha: str, claimed: str | None = None) -> list[str]:
-        """Semver tag names in `repo` whose target commit is `sha`.
+    def tags(self, repo: str) -> dict[str, str]:
+        """Every tag in `repo`, mapped to the commit it resolves to.
 
-        The pin comment Renovate writes (`# v4.4.0`) is a hint about which tag to
-        look at, never evidence: it is checked by resolving that tag and
-        comparing its target to the pinned SHA. Starting there keeps the common
-        case at one or two API calls instead of walking a repository's whole tag
-        list, which for a busy action means hundreds of refs plus a peel request
-        for every annotated one.
+        Read with `git ls-remote`, which returns the whole tag namespace in one
+        request with annotated tags already peeled (the `^{}` lines). The REST
+        alternative is paginated -- a prolific action has hundreds of tags -- and
+        a scan that gave up after N pages would report a legitimately pinned
+        commit as belonging to no release tag at all.
         """
-        if claimed and SEMVER_TAG.match(claimed):
-            ref = self.get(f"/repos/{repo}/git/ref/tags/{claimed}")
-            if isinstance(ref, dict) and self._peel(repo, ref.get("object", {})) == sha:
-                return [claimed]
+        if repo in self._tags:
+            return self._tags[repo]
+        proc = subprocess.run(
+            ["git", "ls-remote", "--tags", f"https://github.com/{repo}.git"],
+            capture_output=True, text=True, check=False, timeout=120,
+        )
+        if proc.returncode != 0:
+            raise Unverifiable(f"cannot list tags of {repo}: {proc.stderr.strip()[:120]}")
+        resolved: dict[str, str] = {}
+        for line in proc.stdout.splitlines():
+            sha, _, ref = line.partition("\t")
+            if not ref.startswith("refs/tags/"):
+                continue
+            name = ref[len("refs/tags/"):]
+            # `<tag>^{}` is the peeled commit of an annotated tag and must win
+            # over the tag object's own SHA.
+            resolved[name.removesuffix("^{}")] = sha
+        self._tags[repo] = resolved
+        return resolved
 
-        # No usable comment, or it did not check out: fall back to the tag list,
-        # whose entries already carry the peeled commit SHA.
-        out = []
-        for page in range(1, 4):
-            tags = self.get(f"/repos/{repo}/tags?per_page=100&page={page}")
-            if not isinstance(tags, list) or not tags:
-                break
-            for tag in tags:
-                name = tag.get("name", "")
-                if SEMVER_TAG.match(name) and tag.get("commit", {}).get("sha") == sha:
-                    out.append(name)
-            if out or len(tags) < 100:
-                break
-        return out
+    def semver_tags_at(self, repo: str, sha: str) -> list[str]:
+        """Semver tag names in `repo` whose target commit is `sha`."""
+        return sorted(
+            name for name, target in self.tags(repo).items()
+            if target == sha and SEMVER_TAG.match(name)
+        )
 
-    def _peel(self, repo: str, obj: dict) -> str | None:
-        """Commit SHA behind a ref object, resolving annotated tag objects."""
-        target = obj.get("sha")
-        if obj.get("type") == "tag":
-            peeled = self.get(f"/repos/{repo}/git/tags/{target}")
-            if isinstance(peeled, dict):
-                return peeled.get("object", {}).get("sha")
-        return target
-
-    def release_published_at(self, repo: str, tag: str) -> tuple[dt.datetime | None, str]:
+    def release(self, repo: str, tag: str) -> tuple[dt.datetime, bool]:
+        """`(published_at, immutable)` for `tag`'s release."""
         rel = self.get(f"/repos/{repo}/releases/tags/{tag}")
         if not isinstance(rel, dict) or "_error" in rel:
             err = rel.get("_error", "unknown error") if isinstance(rel, dict) else "bad response"
-            return None, f"no release for {tag} ({err})"
+            raise Unverifiable(f"no release for {tag} ({err})")
         stamp = rel.get("published_at")
         if not stamp:
-            return None, f"release {tag} has no published_at"
-        return dt.datetime.fromisoformat(stamp.replace("Z", "+00:00")), ""
+            raise Unverifiable(f"release {tag} has no published_at")
+        return parse_stamp(stamp), bool(rel.get("immutable"))
+
+    def commit_date(self, repo: str, sha: str) -> dt.datetime:
+        """Latest of a commit's author and committer dates."""
+        data = self.get(f"/repos/{repo}/commits/{sha}")
+        if not isinstance(data, dict) or "_error" in data:
+            err = data.get("_error", "unknown error") if isinstance(data, dict) else "bad response"
+            raise Unverifiable(f"cannot read commit {sha[:12]} ({err})")
+        commit = data.get("commit", {})
+        stamps = [
+            commit.get(role, {}).get("date")
+            for role in ("committer", "author")
+        ]
+        dates = [parse_stamp(s) for s in stamps if s]
+        if not dates:
+            raise Unverifiable(f"commit {sha[:12]} has no timestamp")
+        return max(dates)
+
+
+def parse_stamp(stamp: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
 def load_allowlist(path: str) -> dict[str, str]:
@@ -229,22 +274,43 @@ def workflow_files(paths: list[str]) -> list[str]:
     return sorted(found)
 
 
-def changed_files(base: str) -> list[str]:
-    """Workflow files touched relative to `base`, for PR-scoped runs."""
-    merge_base = subprocess.run(
-        ["git", "merge-base", "HEAD", base],
-        capture_output=True, text=True, check=False,
-    ).stdout.strip() or base
-    diff = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=d", merge_base, "HEAD"],
-        capture_output=True, text=True, check=False,
-    ).stdout.split()
-    return [f for f in diff if f.endswith((".yml", ".yaml")) and os.path.exists(f)]
+def changed_files(base: str, paths: list[str]) -> list[str]:
+    """Workflow files under `paths` that changed relative to `base`.
+
+    Raises `Unverifiable` rather than returning nothing when git cannot answer:
+    a shallow clone or an unfetched base ref would otherwise yield an empty file
+    list, and "inspected nothing" would report as a pass.
+    """
+    def git(*args: str) -> str:
+        proc = subprocess.run(
+            ["git", *args], capture_output=True, text=True, check=False,
+        )
+        if proc.returncode != 0:
+            raise Unverifiable(
+                f"git {' '.join(args)} failed: {proc.stderr.strip()[:200]}. "
+                "A PR-scoped run needs the base ref fetched (fetch-depth: 0)."
+            )
+        return proc.stdout
+
+    merge_base = git("merge-base", "HEAD", base).strip()
+    diff = git("diff", "--name-only", "--diff-filter=d", merge_base, "HEAD").split()
+    return [
+        f for f in diff
+        if f.endswith((".yml", ".yaml")) and os.path.exists(f)
+        and any(under(f, root) for root in paths)
+    ]
+
+
+def under(path: str, root: str) -> bool:
+    """Whether `path` is `root` or sits inside it, comparing whole segments."""
+    path = os.path.normpath(path)
+    root = os.path.normpath(root)
+    return root == "." or path == root or path.startswith(root + os.sep)
 
 
 def verify_ref(gh: GitHub, ref: str, min_age: dt.timedelta, allow: dict[str, str],
                now: dt.datetime, internal_owner: str | None = None,
-               claimed: str | None = None) -> tuple[str, str, list[str]]:
+               require_immutable: bool = False) -> tuple[str, str, list[str]]:
     """Classify a single `owner/repo[/path]@ref` reference."""
     target, _, pin = ref.partition("@")
     if ref.startswith(LOCAL_PREFIXES) or ref.startswith("docker://") or not pin:
@@ -269,23 +335,55 @@ def verify_ref(gh: GitHub, ref: str, min_age: dt.timedelta, allow: dict[str, str
     if not SHA.match(pin):
         return "fail", f"not SHA-pinned (pinned to {pin!r})", []
 
-    tags = gh.semver_tags_at(repo, pin, claimed)
+    try:
+        tags = gh.semver_tags_at(repo, pin)
+    except Unverifiable as exc:
+        return "fail", str(exc), []
     if not tags:
         return "fail", "pinned SHA is not the target of any vX.Y.Z tag", []
 
-    # Several tags can share a commit (v4.4.0 and v4 both pointing at it). The
-    # pin is acceptable if any of them is backed by a sufficiently old release.
+    # Several tags can share a commit (v1.2.3 and 1.2.3, or a retag). The pin is
+    # acceptable if any one of them clears every gate, so a tag without a release
+    # does not condemn a commit that another tag does vouch for.
     problems = []
-    for tag in sorted(tags):
-        published, err = gh.release_published_at(repo, tag)
-        if published is None:
-            problems.append(err)
+    for tag in tags:
+        try:
+            problem = check_tag(gh, repo, pin, tag, min_age, now, require_immutable)
+        except Unverifiable as exc:
+            problems.append(str(exc))
             continue
-        age = now - published
-        if age >= min_age:
-            return "pass", f"{tag} published {age.days}d ago", tags
-        problems.append(f"{tag} published {age.days}d ago, under minimum")
+        if problem is None:
+            return "pass", verdict_detail(gh, repo, pin, tag, now), tags
+        problems.append(problem)
     return "fail", "; ".join(problems), tags
+
+
+def check_tag(gh: GitHub, repo: str, sha: str, tag: str, min_age: dt.timedelta,
+              now: dt.datetime, require_immutable: bool) -> str | None:
+    """`None` if `tag` vouches for `sha`, else why it does not."""
+    published, immutable = gh.release(repo, tag)
+    age = now - published
+    if age < min_age:
+        return f"{tag} published {age.days}d ago, under minimum"
+    if immutable:
+        return None
+    if require_immutable:
+        return f"{tag} is not an immutable release"
+    # A mutable tag could have been moved onto a commit created long after the
+    # release it now claims; that ordering is the detectable part.
+    committed = gh.commit_date(repo, sha)
+    if committed > published + CLOCK_SKEW:
+        return (
+            f"{tag} was published {published:%Y-%m-%d} but its commit dates from "
+            f"{committed:%Y-%m-%d} -- the tag appears to have been moved"
+        )
+    return None
+
+
+def verdict_detail(gh: GitHub, repo: str, sha: str, tag: str, now: dt.datetime) -> str:
+    published, immutable = gh.release(repo, tag)
+    basis = "immutable release" if immutable else "mutable tag, commit consistent"
+    return f"{tag} published {(now - published).days}d ago ({basis})"
 
 
 def main() -> int:
@@ -297,10 +395,18 @@ def main() -> int:
     ap.add_argument("--allowlist", default=".github/action-pin-allowlist.yml")
     ap.add_argument("--internal-owner", default=os.environ.get("GITHUB_REPOSITORY_OWNER"),
                     help="owner whose own actions are first-party and skipped")
+    ap.add_argument("--require-immutable", action="store_true",
+                    help="accept only immutable releases, whose tag cannot move")
     ap.add_argument("--summary", default=os.environ.get("GITHUB_STEP_SUMMARY"))
     args = ap.parse_args()
 
-    files = changed_files(args.base) if args.base else workflow_files(args.paths or [".github"])
+    paths = args.paths or [".github"]
+    try:
+        files = changed_files(args.base, paths) if args.base else workflow_files(paths)
+    except Unverifiable as exc:
+        print(f"FAIL cannot determine which files to check -- {exc}")
+        return 1
+
     gh = GitHub(os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"))
     allow = load_allowlist(args.allowlist)
     min_age = dt.timedelta(days=args.min_age_days)
@@ -313,12 +419,11 @@ def main() -> int:
                 m = USES.match(line)
                 if not m:
                     continue
-                ref = m.group("ref")
-                claimed = (m.group("comment") or "").split()[0] if m.group("comment") else None
                 status, detail, tags = verify_ref(
-                    gh, ref, min_age, allow, now, args.internal_owner, claimed
+                    gh, m.group("ref"), min_age, allow, now,
+                    args.internal_owner, args.require_immutable,
                 )
-                findings.append(Finding(path, lineno, ref, status, detail, tags))
+                findings.append(Finding(path, lineno, m.group("ref"), status, detail, tags))
 
     failures = [f for f in findings if f.status == "fail"]
     for f in findings:

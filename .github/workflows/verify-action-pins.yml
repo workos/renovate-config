@@ -35,6 +35,20 @@ on:
         type: string
         required: false
         default: ".github/action-pin-allowlist.yml"
+      checker-ref:
+        description: >-
+          Ref of workos/renovate-config to run the checker from. A reusable
+          workflow cannot see the ref it was called with (`github.workflow_ref`
+          is the caller's), so a caller that pins this workflow to a SHA should
+          pass the same SHA here to run exactly the reviewed implementation.
+          Defaults to main, which tracks this repository's default branch.
+        type: string
+        required: false
+        default: "main"
+      require-immutable:
+        type: string
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -53,11 +67,11 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           repository: workos/renovate-config
-          # Same-SHA as the caller's `uses:` would be preferable, but a reusable
-          # workflow cannot see the ref it was called with; `github.workflow_ref`
-          # is the caller's. main is acceptable here because this is a
-          # first-party repository whose changes go through review.
-          ref: main
+          # The implementation must be pinnable independently of this workflow:
+          # a caller that writes `...@<sha>` otherwise still executes whatever
+          # main holds, so a change here would run with the caller's token
+          # before anyone pinning a SHA had reviewed it.
+          ref: ${{ inputs.checker-ref }}
           path: .verify-action-pins
           persist-credentials: false
 
@@ -67,4 +81,5 @@ jobs:
           base: ${{ inputs.base || (github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || '') }}
           min-age-days: ${{ inputs.min-age-days }}
           allowlist: ${{ inputs.allowlist }}
+          require-immutable: ${{ inputs.require-immutable }}
           token: ${{ github.token }}

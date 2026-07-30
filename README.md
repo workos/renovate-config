@@ -120,12 +120,15 @@ This workflow approves any PR opened by `renovate[bot]` that carries the `renova
 
 The preset can only age an update it has a timestamp for. A bare digest — a 40-character SHA — has none, which is why `digest` updates are not opened at all (see the table above). That leaves one thing Renovate cannot vouch for: the SHA a pin resolved to in the first place. `pin`/`pinDigest` freezes whatever `v4` pointed at when Renovate looked, and if that tag had been moved onto a malicious commit, the pin preserves it.
 
-`verify-action-pins` closes that from outside Renovate, using two facts a SHA alone doesn't give you:
+`verify-action-pins` closes that from outside Renovate, using facts a SHA alone doesn't give you:
 
 1. **Provenance** — the pinned SHA must be the exact target of a `vX.Y.Z` tag upstream. A commit no release tag points at is never something we meant to run.
 2. **Age** — that tag's release must have been published at least 7 days ago, measured by the release's `published_at`.
+3. **Binding** — the release has to be plausibly *about* the pinned commit. A `vX.Y.Z` tag is still a mutable ref: move `v4.3.1` onto a fresh commit and it satisfies (1) while inheriting the old release's timestamp for (2). So either the release is [immutable](https://github.blog/changelog/2025-10-28-immutable-releases-are-now-generally-available/) — the tag provably cannot have moved — or the commit must not be newer than the release that supposedly shipped it.
 
-`published_at` is assigned by GitHub at publish time and isn't settable through the REST API, which is why it's the anchor rather than commit metadata: `GIT_COMMITTER_DATE` lets anyone backdate a freshly pushed commit, so a commit date proves nothing. An attacker who moves a tag still cannot retroactively have published a release last week.
+`published_at` is assigned by GitHub at publish time and isn't settable through the REST API, which is why it's the anchor rather than commit metadata: `GIT_COMMITTER_DATE` lets anyone backdate a freshly pushed commit.
+
+That cuts both ways, and it's worth being precise about what (3) buys: for a non-immutable release it's a consistency check, not proof. It catches the naive hijack — fresh commit, tag moved onto it — but an attacker who backdates the commit passes it. Immutable releases are the only proof available today, and `require-immutable: true` insists on them; almost no upstream action has adopted them yet, so it currently fails nearly everything. Proving a tag never moved without trusting upstream metadata needs a first-seen ledger of `(action, tag) → SHA` recorded here, which is deliberately not in this change.
 
 Add it to a repo with:
 
@@ -140,9 +143,18 @@ jobs:
     uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@main
 ```
 
+If you pin that `uses:` to a SHA, pass the same SHA as `checker-ref` — a reusable workflow cannot see the ref it was called with (`github.workflow_ref` is the caller's), so the implementation it runs is a separate checkout that otherwise tracks `main`:
+
+```yaml
+  action-pins:
+    uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@<sha>
+    with:
+      checker-ref: <sha>
+```
+
 It reports as an ordinary status check, which is what makes it a usable automerge gate: Renovate won't merge a branch with a red status, so a pin whose release is younger than 7 days cannot land — and the check turns green by itself once the release ages, with no human step. Make it a required check to get the guarantee rather than the hint.
 
-The check fails closed — no tag match, no release, no timestamp, and API errors are all failures. A check that goes green when it can't see the data converts an unknown into a tick. Genuine exceptions go in `.github/action-pin-allowlist.yml` (one `owner/repo: reason` per line; see [the example](verify-action-pins/action-pin-allowlist.example.yml)), where they're explicit and reviewable. Two actions in use today need one: `dopplerhq/cli-action` (only `v3`/`v4` tags, no `vX.Y.Z` releases) and `rubygems/configure-rubygems-credentials` (non-semver tags).
+The check fails closed — no tag match, no release, no timestamp, no commit metadata, API errors, and a git failure that leaves it unsure which files changed are all failures. A check that goes green when it can't see the data converts an unknown into a tick. Genuine exceptions go in `.github/action-pin-allowlist.yml` (one `owner/repo: reason` per line; see [the example](verify-action-pins/action-pin-allowlist.example.yml)), where they're explicit and reviewable. Two actions in use today need one: `dopplerhq/cli-action` (only `v3`/`v4` tags, no `vX.Y.Z` releases) and `rubygems/configure-rubygems-credentials` (non-semver tags).
 
 First-party `workos/*` references are skipped: they're covered by this check in the repository that owns them, and demanding a SHA for `workos/actions/...@main` would relocate the trust decision rather than strengthen it.
 
