@@ -255,6 +255,14 @@ class ChangedFilesTest(unittest.TestCase):
         )
         self.assertIn("other.yml", changed_files("main", ["."]))
 
+    def test_path_with_a_space_is_still_scanned(self):
+        """git quotes such a path; reading it as words loses the whole file."""
+        spaced = ".github/workflows/build and test.yml"
+        self.write(spaced, "on: push\n")
+        self.git("add", spaced)
+        self.git("commit", "-qm", "Add a workflow whose name has a space")
+        self.assertIn(spaced, changed_files("main", [".github"]))
+
 
 class UsesScanTest(unittest.TestCase):
     """Every YAML form the scanner misses is an unchecked executable action."""

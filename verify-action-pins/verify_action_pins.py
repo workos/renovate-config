@@ -335,9 +335,13 @@ def changed_files(base: str, paths: list[str]) -> list[str]:
         return proc.stdout
 
     merge_base = git("merge-base", "HEAD", base).strip()
-    diff = git("diff", "--name-only", "--diff-filter=d", merge_base, "HEAD").split()
+    # NUL-delimited: git quotes paths holding spaces or worse, and splitting the
+    # human-readable form would turn one such workflow into fragments that match
+    # no file and vanish from the scan.
+    diff = git("diff", "--name-only", "-z", "--diff-filter=d", merge_base, "HEAD")
+    names = [name for name in diff.split("\0") if name]
     return [
-        f for f in diff
+        f for f in names
         if f.endswith((".yml", ".yaml")) and os.path.exists(f)
         and any(under(f, root) for root in paths)
     ]
