@@ -25,12 +25,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-  # Calling the wrapper the way a consumer does, which the job above cannot: it
-  # exercises the reusable workflow end to end and, in particular, proves that
-  # `github.job_workflow_sha` resolves the checker revision without the caller
-  # passing anything, since the resolve step fails the job when it doesn't.
+  # Calling the wrapper the way a consumer does, which the job above cannot, so
+  # a change that breaks adoption fails here rather than in someone else's repo.
+  # The checker revision is this PR's head: a consumer passes the SHA it pinned,
+  # and there is no default to fall back to.
   action-pins-reusable:
     uses: ./.github/workflows/verify-action-pins.yml
+    with:
+      checker-ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
   presets:
     runs-on: ubuntu-latest

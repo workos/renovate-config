@@ -140,10 +140,28 @@ on:
 
 jobs:
   action-pins:
-    uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          fetch-depth: 0  # a PR-scoped run needs the base ref to diff against
+
+      - uses: workos/renovate-config/verify-action-pins@<sha>  # v-whatever
 ```
 
-Pinning that `uses:` to a SHA is enough on its own. The implementation is a separate checkout — a reusable workflow can't run code from its own repository without one — and it defaults to `github.job_workflow_sha`, the commit of the workflow file being run, so pinning the caller pins the checker too. The `checker-ref` input exists only to run a different revision deliberately; there's no `main` fallback, because a mutable default is the thing being avoided, so a runner that doesn't populate that context fails the job with an explicit message instead.
+That's the composite action, called the way this repo asks you to call anything: pinned to a SHA, updated by Renovate under the same 7-day rule as every other action. It's the recommended form because the pin means what it says — the code that runs is the code at that SHA, nothing else.
+
+There is also a reusable workflow (`.github/workflows/verify-action-pins.yml`) for a shorter caller, but it takes a **required** `checker-ref`:
+
+```yaml
+jobs:
+  action-pins:
+    uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@<sha>
+    with:
+      checker-ref: <sha>  # the same SHA
+```
+
+The duplication is the honest price of the form. A reusable workflow can't run code from its own repository without a second checkout, and it can't see the ref it was called with — `github.workflow_ref` is the caller's, and `github.job_workflow_sha` is documented but arrives empty in workflow expressions (verified in CI, not assumed). So the ref has to come from the caller, and every default the input could carry is a branch: pinning the workflow to a SHA while the implementation tracked `main` would look pinned and not be. Passing `checker-ref: main` is allowed and floats deliberately, which is the point — you have to write it down.
 
 It reports as an ordinary status check, which is what makes it a usable automerge gate: Renovate won't merge a branch with a red status, so a pin whose release is younger than 7 days cannot land — and the check turns green by itself once the release ages, with no human step. Make it a required check to get the guarantee rather than the hint.
 

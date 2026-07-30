@@ -1,11 +1,19 @@
 name: Verify action pins
 
 # Reusable wrapper around verify-action-pins/action.yml, so a consuming repo can
-# adopt the check with a three-line caller instead of a checkout + action pair:
+# adopt the check with a short caller instead of a checkout + action pair:
 #
 #   jobs:
 #     action-pins:
-#       uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@main
+#       uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@<sha>
+#       with:
+#         checker-ref: <sha>
+#
+# `checker-ref` is required because the implementation is a second checkout and
+# a reusable workflow cannot see the ref it was called with: `github.workflow_ref`
+# is the caller's, and `github.job_workflow_sha` is documented but arrives empty
+# in workflow expressions. Rather than default it to a branch, this asks for it,
+# so a caller cannot end up running unpinned code without having said so.
 #
 # Called on pull_request it reports as a normal status check, which is what makes
 # it usable as a required check and as an automerge gate: Renovate will not merge
@@ -37,15 +45,15 @@ on:
         default: ".github/action-pin-allowlist.yml"
       checker-ref:
         description: >-
-          Ref of workos/renovate-config to run the checker from. Defaults to
-          `github.job_workflow_sha`, the commit of this workflow file itself, so
-          the implementation always matches the revision the caller asked for —
-          pin this workflow to a SHA and the checker runs from that same SHA.
-          Set this only to run a different revision on purpose, or on a runner
-          that does not populate that context (where the job fails without it).
+          Ref of workos/renovate-config to run the checker from. Required, and
+          deliberately so: the implementation is a second checkout, a reusable
+          workflow cannot see the ref it was called with, and every default this
+          could carry is a mutable one. Pass the same SHA you pinned this
+          workflow to; passing "main" is allowed but then says out loud that the
+          checker floats. To avoid saying it twice, use the composite action
+          directly instead (see the README).
         type: string
-        required: false
-        default: ""
+        required: true
       require-immutable:
         type: string
         required: false
@@ -59,29 +67,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # The checker code must come from the same revision as this workflow file,
-      # or a caller writing `...@<sha>` would still execute whatever main holds —
-      # a change here running with the caller's token before the person who
-      # pinned it had reviewed it. `job_workflow_sha` is the commit of the
-      # reusable workflow itself, which is exactly that revision. There is no
-      # fallback: a mutable default is the defect this resolves, so if the
-      # revision cannot be determined the job fails and says so.
-      - name: Resolve the checker revision
-        id: checker
+      # `required: true` still admits an empty string, and an empty ref checks
+      # out the default branch — the mutable code path this input exists to
+      # prevent. A gate that cannot say which code it is about to run stops.
+      - name: Require an explicit checker revision
         shell: bash
         env:
           CHECKER_REF: ${{ inputs.checker-ref }}
-          WORKFLOW_SHA: ${{ github.job_workflow_sha }}
         run: |
           set -euo pipefail
-          ref="${CHECKER_REF:-$WORKFLOW_SHA}"
-          if [[ -z "$ref" ]]; then
-            echo "::error::Cannot tell which revision of the checker to run:" \
-              "github.job_workflow_sha is empty and checker-ref was not set." \
-              "Pass checker-ref explicitly."
+          if [[ -z "$CHECKER_REF" ]]; then
+            echo "::error::checker-ref is empty. Pass the SHA this workflow is" \
+              "pinned to, or 'main' to run the checker from the default branch."
             exit 1
           fi
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
@@ -92,7 +91,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
           repository: workos/renovate-config
-          ref: ${{ steps.checker.outputs.ref }}
+          ref: ${{ inputs.checker-ref }}
           path: .verify-action-pins
           persist-credentials: false
 
