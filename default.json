@@ -1,9 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "WorkOS shared Renovate preset. Hardens GitHub Actions usage with SHA-pinned digests, a 7-day minimum release age, and grouped/automerged minor & patch updates. See README for details.",
+  "description": "WorkOS shared Renovate preset. Hardens GitHub Actions usage with SHA-pinned digests tracked by semver tag, a 7-day minimum release age, and grouped/automerged minor & patch updates. See README for details.",
   "extends": [
     "config:recommended",
-    "helpers:pinGitHubActionDigests"
+    "helpers:pinGitHubActionDigestsToSemver"
   ],
   "dependencyDashboard": false,
   "minimumReleaseAge": "7 days",
@@ -20,11 +20,27 @@
   },
   "packageRules": [
     {
-      "description": "Group and automerge non-major (digest/pinDigest/minor/patch) GitHub Actions updates.",
+      "description": "Group and automerge minor/patch GitHub Actions updates. helpers:pinGitHubActionDigestsToSemver makes these resolve to a semver tag, which carries a release timestamp, so the 7-day minimum release age is genuinely enforced before automerge.",
       "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["digest", "pinDigest", "minor", "patch"],
-      "groupName": "github-actions non-major",
-      "groupSlug": "github-actions-non-major",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "github-actions versions",
+      "groupSlug": "github-actions-versions",
+      "automerge": true,
+      "addLabels": ["renovate/patch"]
+    },
+    {
+      "description": "Do not open bare digest re-points (same tag, new commit) for GitHub Actions. The github-tags datasource attaches no timestamp to a digest, so minimumReleaseAgeBehaviour:timestamp-required holds these PRs pending forever — and automerging them anyway would merge a commit of unknown age, which is exactly the tag-hijack shape SHA pinning defends against. Pinned SHAs move only as part of an aged semver update; a re-pointed tag is caught by the security team's review instead.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest"],
+      "enabled": false
+    },
+    {
+      "description": "Automerge the initial pin of an action with no minimum release age. A pin replaces a floating tag with the SHA that tag already resolves to, so it introduces no new code — it freezes what every run is executing today. Waiting 7 days to pin means continuing to run the floating tag in the meantime, which is strictly worse.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["pin", "pinDigest"],
+      "minimumReleaseAge": null,
+      "groupName": "github-actions pins",
+      "groupSlug": "github-actions-pins",
       "automerge": true,
       "addLabels": ["renovate/patch"]
     },

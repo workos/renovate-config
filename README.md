@@ -17,11 +17,12 @@ Centralize dependency-management policy across the org so that a single edit pro
 
 The base preset that all WorkOS repositories can extend. It implements supply-chain hardening and conservative dependency management:
 
-- **Pins GitHub Actions to full commit SHAs** via `helpers:pinGitHubActionDigests`. Any newly-added action referenced by tag (e.g. `actions/checkout@v6`) gets auto-pinned to a SHA with a version comment (`@<sha> # v6`).
+- **Pins GitHub Actions to full commit SHAs, tracked by semver tag** via `helpers:pinGitHubActionDigestsToSemver`. Any newly-added action referenced by tag (e.g. `actions/checkout@v6`) gets auto-pinned to a SHA with a version comment (`@<sha> # v6`), and the pinned SHA thereafter moves only as part of a semver update (`# v6` → `# v6.1.0`).
 - **Enforces a 7-day minimum release age** (`minimumReleaseAge: "7 days"`). New action releases are not eligible for auto-update until they have been published for 7+ days.
 - **Treats missing release timestamps as "not yet eligible"** (`minimumReleaseAgeBehaviour: "timestamp-required"`) — the safer default introduced in Renovate 42.
-- **Suppresses branches for not-yet-eligible updates** (`internalChecksFilter: "strict"`) so the inbox stays quiet.
-- **Groups and auto-merges minor/patch/digest GitHub Actions updates** after CI passes. Major updates open a separate PR and require human review.
+- **Suppresses branches for not-yet-eligible updates** (`internalChecksFilter: "strict"`) so the inbox stays quiet. A version update does not open a PR until it has already cleared the 7 days; the wait happens before PR creation, not in a pending check on an open PR.
+- **Groups and auto-merges minor/patch GitHub Actions updates** after CI passes, in `github-actions versions`. Major updates are not opened at all.
+- **Does not open bare digest re-points** (same tag, new commit). See [GitHub Actions update policy](#github-actions-update-policy).
 - **Patch-only policy for software dependencies by default** — minor and major dependency updates are disabled in the base preset. Patch updates are auto-merged after CI passes and the 7-day minimum age is met. Patch PRs are labeled `renovate/patch` at creation time. Consuming repos can override this to enable minor updates (see [Enabling minor updates](#enabling-minor-updates)).
 - **Groups patch updates by dependency name** — all packages that use the same dependency are updated in a single PR. This ensures monorepos with version-consistency policies (e.g. Rush) pass lockfile validation. For single-package repos this is a no-op.
 - **After-hours schedule** — Renovate only runs outside business hours for both US coasts: weekdays 9 PM–7 AM Eastern (6 PM–4 AM Pacific), and all day on weekends. The weekend window closes at 7 AM ET Monday.
@@ -38,6 +39,24 @@ Extends the default preset with a more permissive update policy suited for publi
 - **Monthly schedule** — runs on the 15th of each month before 12pm UTC.
 - **No merge-queue labels** — does not add labels like `aviator/merge` since public repos typically merge PRs directly.
 - **Security/vulnerability PRs fire immediately** — overrides the base preset's after-hours constraint so security fixes are not delayed in public repos.
+
+## GitHub Actions update policy
+
+Actions are SHA-pinned, but a SHA has no release date, so it cannot be aged. Renovate's `github-tags` datasource attaches no timestamp to a digest, which means `minimumReleaseAgeBehaviour: "timestamp-required"` holds every digest update pending forever — the `renovate/stability-days` check on a grouped `digest` PR can never pass, and grouping it with real version updates blocks those too.
+
+The preset therefore splits actions updates into four buckets:
+
+| Update | Behaviour | Why |
+|--------|-----------|-----|
+| `minor` / `patch` (semver tag) | 7-day age gate, grouped in `github-actions versions`, automerged | The tag has a release timestamp, so the age gate is real |
+| `pin` / `pinDigest` | No age gate, grouped in `github-actions pins`, automerged | Pinning freezes the SHA the floating tag already resolves to — no new code |
+| `digest` (tag re-pointed to a new commit) | Not opened | No timestamp to age against; automerging would merge a commit of unknown age, which is the tag-hijack shape SHA pinning exists to defend against |
+| `major` | Not opened | Breaking changes; bump manually |
+
+Consequences worth knowing:
+
+- **A tag that is force-pushed to new commits is not followed.** That is deliberate: the pinned SHA keeps running the code we reviewed. It is also the reason to prefer actions published with [immutable releases](https://github.blog/changelog/2025-10-28-immutable-releases-are-now-generally-available/), whose tags cannot move.
+- **An action that publishes no `X.Y.Z` tag gets no updates.** `helpers:pinGitHubActionDigestsToSemver` reads the version from the pin comment, so `# v3` is fine as long as the upstream repo tags full semver — Renovate resolves `v3` to e.g. `v3.4.1` on the next aged update. An action that only ever tags `v3` is frozen at its current SHA and has to be bumped by hand.
 
 ## How to use it
 
