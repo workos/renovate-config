@@ -156,6 +156,8 @@ It reports as an ordinary status check, which is what makes it a usable automerg
 
 The check fails closed — no tag match, no release, no timestamp, no commit metadata, API errors, and a git failure that leaves it unsure which files changed are all failures. A check that goes green when it can't see the data converts an unknown into a tick. Genuine exceptions go in `.github/action-pin-allowlist.yml` (one `owner/repo: reason` per line; see [the example](verify-action-pins/action-pin-allowlist.example.yml)), where they're explicit and reviewable. Two actions in use today need one: `dopplerhq/cli-action` (only `v3`/`v4` tags, no `vX.Y.Z` releases) and `rubygems/configure-rubygems-credentials` (non-semver tags).
 
+Workflows are parsed as YAML rather than pattern-matched line by line, so every form Actions accepts is covered — flow mappings, quoted keys, a value on the next line, anchors — and a file that doesn't parse is a failure rather than a file with no findings. That needs PyYAML, which GitHub-hosted runners ship; the action installs it if a self-hosted runner doesn't.
+
 First-party `workos/*` references are skipped: they're covered by this check in the repository that owns them, and demanding a SHA for `workos/actions/...@main` would relocate the trust decision rather than strengthen it.
 
 ## Enabling minor updates

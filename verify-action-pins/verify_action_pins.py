@@ -62,22 +62,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
+import yaml
+
 API = "https://api.github.com"
 
-# A `uses` key and its value, wherever in a line it appears. Deliberately not
-# anchored to the start of the line: YAML has more than one way to write a step,
-# and each form the scanner fails to recognise is an executable action it reports
-# nothing about --
-#
-#     - uses: owner/repo@ref     # block mapping
-#     - 'uses': owner/repo@ref   # quoted key
-#     - {uses: owner/repo@ref}   # flow mapping
-#
-# The value stops at whitespace, a quote, or a flow terminator, and `#` onwards
-# is handled by the caller so a commented-out line is not treated as a step.
-USES = re.compile(
-    r"(?<![\w./-])['\"]?uses['\"]?[ \t]*:[ \t]*['\"]?(?P<ref>[^\s'\",}\]]+)"
-)
 SHA = re.compile(r"^[0-9a-f]{40}$")
 SEMVER_TAG = re.compile(r"^v?\d+\.\d+\.\d+$")
 
@@ -268,18 +256,50 @@ def load_allowlist(path: str) -> dict[str, str]:
     return allow
 
 
-def uses_in_line(line: str) -> list[tuple[str, str | None]]:
-    """Every `(ref, pin comment)` a single line declares.
+def uses_in_file(path: str) -> list[tuple[int, str]]:
+    """Every `(line, ref)` a YAML file declares, found by parsing it.
 
-    A flow sequence can put several steps on one line, so all matches count. The
-    line is split at `#` first: everything after it is a comment, which both
-    keeps a commented-out `uses:` from being read as a step and recovers the pin
-    comment Renovate writes.
+    Scanning lines with a regex was wrong in kind rather than in detail. `uses`
+    is a YAML key, and YAML offers more ways to write one than a pattern can
+    chase: a flow mapping (`- {uses: o/r@ref}`), a quoted key, a value on the
+    following line, a folded scalar, an alias. Each form the pattern missed was
+    an action the workflow executes and the check said nothing about, which is
+    the one failure mode a security gate must not have. So the file is composed
+    into a node tree instead, and every `uses` key is found at any depth whatever
+    syntax spelled it.
+
+    A file that does not parse raises `Unverifiable`: it is either not the YAML
+    we take it for or it holds something this scanner does not model, and both
+    are reasons to go red rather than to look away.
     """
-    code, sep, comment = line.partition("#")
-    trailing = comment.strip() if sep else None
-    refs = [m.group("ref") for m in USES.finditer(code)]
-    return [(ref, trailing if len(refs) == 1 else None) for ref in refs]
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        roots = list(yaml.compose_all(text))
+    except yaml.YAMLError as exc:
+        raise Unverifiable(f"cannot parse {path}: {str(exc).splitlines()[0]}") from exc
+
+    found: list[tuple[int, str]] = []
+
+    def walk(node: yaml.Node | None, seen: set[int]) -> None:
+        # An anchor makes one node appear in several places; visiting it twice
+        # would report the same reference twice.
+        if node is None or id(node) in seen:
+            return
+        seen.add(id(node))
+        if isinstance(node, yaml.MappingNode):
+            for key, value in node.value:
+                if (isinstance(key, yaml.ScalarNode) and key.value == "uses"
+                        and isinstance(value, yaml.ScalarNode)):
+                    found.append((value.start_mark.line + 1, value.value.strip()))
+                walk(value, seen)
+        elif isinstance(node, yaml.SequenceNode):
+            for item in node.value:
+                walk(item, seen)
+
+    for root in roots:
+        walk(root, set())
+    return sorted(found)
 
 
 def workflow_files(paths: list[str]) -> list[str]:
@@ -435,14 +455,17 @@ def main() -> int:
 
     findings: list[Finding] = []
     for path in files:
-        with open(path, encoding="utf-8") as fh:
-            for lineno, line in enumerate(fh, 1):
-                for ref, _ in uses_in_line(line):
-                    status, detail, tags = verify_ref(
-                        gh, ref, min_age, allow, now,
-                        args.internal_owner, args.require_immutable,
-                    )
-                    findings.append(Finding(path, lineno, ref, status, detail, tags))
+        try:
+            refs = uses_in_file(path)
+        except Unverifiable as exc:
+            findings.append(Finding(path, 0, path, "fail", str(exc)))
+            continue
+        for lineno, ref in refs:
+            status, detail, tags = verify_ref(
+                gh, ref, min_age, allow, now,
+                args.internal_owner, args.require_immutable,
+            )
+            findings.append(Finding(path, lineno, ref, status, detail, tags))
 
     failures = [f for f in findings if f.status == "fail"]
     for f in findings:

@@ -19,7 +19,7 @@ from verify_action_pins import (
     GitHub,
     Unverifiable,
     changed_files,
-    uses_in_line,
+    uses_in_file,
     verify_ref,
 )
 
@@ -243,29 +243,53 @@ class ChangedFilesTest(unittest.TestCase):
 class UsesScanTest(unittest.TestCase):
     """Every YAML form the scanner misses is an unchecked executable action."""
 
-    def test_forms_of_uses_line(self):
-        cases = [
-            ("      - uses: o/r@sha # v1.2.3\n", [("o/r@sha", "v1.2.3")]),
-            ("        uses: 'o/r@sha'  # v1.2.3 (comment)\n", [("o/r@sha", "v1.2.3 (comment)")]),
-            ("      - uses: o/r@sha\n", [("o/r@sha", None)]),
-            ("      - uses: docker://alpine:3\n", [("docker://alpine:3", None)]),
-            # Quoted keys and flow mappings are valid YAML that Actions runs.
-            ("      - 'uses': o/r@main\n", [("o/r@main", None)]),
-            ('      - "uses" : o/r@main\n', [("o/r@main", None)]),
-            ("      - {uses: o/r@main}\n", [("o/r@main", None)]),
-            ("      - { uses: o/r@main, with: {a: b} }\n", [("o/r@main", None)]),
-            ("    steps: [{uses: a/b@main}, {uses: c/d@main}]\n",
-             [("a/b@main", None), ("c/d@main", None)]),
-        ]
-        for line, expected in cases:
-            with self.subTest(line=line):
-                self.assertEqual(uses_in_line(line), expected)
+    def scan(self, body: str) -> list[str]:
+        with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as fh:
+            fh.write(body)
+            self.addCleanup(os.unlink, fh.name)
+        return [ref for _, ref in uses_in_file(fh.name)]
 
-    def test_non_uses_lines_ignored(self):
-        for line in ("        with:\n", "        # uses: o/r@v1\n", "          image: o/r@sha\n",
-                     "          reuses: o/r@sha\n"):
-            with self.subTest(line=line):
-                self.assertEqual(uses_in_line(line), [])
+    def test_every_step_syntax_is_scanned(self):
+        """Actions accepts all of these; a scanner that reads only the common
+        block form vouches for the rest without looking at them."""
+        cases = [
+            ("steps:\n  - uses: o/r@sha # v1.2.3\n", ["o/r@sha"]),
+            ("steps:\n  - uses: 'o/r@sha'  # v1.2.3\n", ["o/r@sha"]),
+            ("steps:\n  - uses: docker://alpine:3\n", ["docker://alpine:3"]),
+            ("steps:\n  - 'uses': o/r@main\n", ["o/r@main"]),
+            ("steps:\n  - {uses: o/r@main}\n", ["o/r@main"]),
+            ("steps: [{uses: a/b@main}, {uses: c/d@main}]\n", ["a/b@main", "c/d@main"]),
+            # Value on the following line, folded, and via an anchor.
+            ("steps:\n  - uses:\n      o/r@main\n", ["o/r@main"]),
+            ("steps:\n  - uses: >-\n      o/r@main\n", ["o/r@main"]),
+            ("x: &s {uses: o/r@main}\nsteps:\n  - *s\n", ["o/r@main"]),
+            # Nested wherever it appears: a composite action's own steps.
+            ("runs:\n  using: composite\n  steps:\n    - uses: o/r@main\n", ["o/r@main"]),
+        ]
+        for body, expected in cases:
+            with self.subTest(body=body):
+                self.assertEqual(self.scan(body), expected)
+
+    def test_non_uses_keys_ignored(self):
+        body = (
+            "steps:\n"
+            "  - with:\n"
+            "      image: o/r@sha\n"
+            "  # - uses: o/r@commented-out\n"
+            "  - reuses: o/r@sha\n"
+        )
+        self.assertEqual(self.scan(body), [])
+
+    def test_unparseable_file_is_unverifiable(self):
+        """A file the scanner cannot read is red, not empty."""
+        with self.assertRaises(Unverifiable):
+            self.scan("steps:\n  - uses: o/r@sha\n   bad: [unclosed\n")
+
+    def test_line_numbers_locate_the_reference(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as fh:
+            fh.write("steps:\n  - run: true\n  - uses: o/r@sha\n")
+            self.addCleanup(os.unlink, fh.name)
+        self.assertEqual(uses_in_file(fh.name), [(3, "o/r@sha")])
 
 
 if __name__ == "__main__":

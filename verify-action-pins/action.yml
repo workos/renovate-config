@@ -44,6 +44,18 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Ensure PyYAML is available
+      shell: bash
+      # The checker parses workflows rather than pattern-matching lines, because
+      # every YAML form a regex missed was an action it silently vouched for.
+      # GitHub-hosted runners ship PyYAML, so this is a no-op there and a
+      # one-line install on a self-hosted runner that does not.
+      run: |
+        set -euo pipefail
+        python3 -c 'import yaml' 2>/dev/null && exit 0
+        python3 -m pip install --quiet --disable-pip-version-check pyyaml \
+          || python3 -m pip install --quiet --disable-pip-version-check --break-system-packages pyyaml
+
     - name: Verify action pins
       shell: bash
       env:
