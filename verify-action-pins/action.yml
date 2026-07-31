@@ -1,0 +1,84 @@
+name: Verify action pins
+description: >-
+  Fail if any third-party `uses:` reference is not pinned to the SHA of a semver
+  release tag that has been published for at least a minimum age.
+
+inputs:
+  paths:
+    description: "Space-separated files or directories to scan."
+    required: false
+    default: ".github"
+  base:
+    description: >-
+      Only check files changed against this ref (e.g. the PR base). Leave empty
+      to scan every file under `paths`. A PR-scoped run needs the repository
+      checked out with enough history for `git merge-base` to resolve, so pass
+      `fetch-depth: 0` to actions/checkout when using this.
+    required: false
+    default: ""
+  min-age-days:
+    description: "Minimum age, in days, of the release behind a pinned SHA."
+    required: false
+    default: "7"
+  allowlist:
+    description: >-
+      Path to a file of `owner/repo: reason` exemptions. Missing file means no
+      exemptions.
+    required: false
+    default: ".github/action-pin-allowlist.yml"
+  require-immutable:
+    description: >-
+      Accept only immutable releases, whose tag provably cannot have been moved.
+      Stronger, but most upstream actions have not enabled immutable releases yet,
+      so it currently fails almost everything.
+    required: false
+    default: "false"
+  token:
+    description: >-
+      Token used for GitHub API reads (tags and releases of third-party action
+      repositories). The default `GITHUB_TOKEN` is sufficient — only public read
+      access is needed — but it must be supplied, because unauthenticated API
+      access is rate-limited to 60 requests/hour and would make the check flap.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure PyYAML is available
+      shell: bash
+      # The checker parses workflows rather than pattern-matching lines, because
+      # every YAML form a regex missed was an action it silently vouched for.
+      # GitHub-hosted runners ship PyYAML, so this is a no-op there and a
+      # one-line install on a self-hosted runner that does not.
+      run: |
+        set -euo pipefail
+        python3 -c 'import yaml' 2>/dev/null && exit 0
+        python3 -m pip install --quiet --disable-pip-version-check pyyaml \
+          || python3 -m pip install --quiet --disable-pip-version-check --break-system-packages pyyaml
+
+    - name: Verify action pins
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        # Inputs reach bash through the environment rather than by template
+        # substitution: a caller-supplied value interpolated into `run:` becomes
+        # shell source, so `paths: "; curl evil"` would execute in this job.
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_MIN_AGE_DAYS: ${{ inputs.min-age-days }}
+        INPUT_ALLOWLIST: ${{ inputs.allowlist }}
+        INPUT_REQUIRE_IMMUTABLE: ${{ inputs.require-immutable }}
+        SCRIPT: ${{ github.action_path }}/verify_action_pins.py
+      run: |
+        set -euo pipefail
+        args=(--min-age-days "$INPUT_MIN_AGE_DAYS" --allowlist "$INPUT_ALLOWLIST")
+        if [[ -n "$INPUT_BASE" ]]; then
+          args+=(--base "$INPUT_BASE")
+        fi
+        if [[ "$INPUT_REQUIRE_IMMUTABLE" == "true" ]]; then
+          args+=(--require-immutable)
+        fi
+        # `paths` is documented as space-separated, so word splitting here is
+        # intended -- but on a value that never reached the shell as code.
+        read -r -a paths <<< "$INPUT_PATHS"
+        python3 "$SCRIPT" "${args[@]}" "${paths[@]}"

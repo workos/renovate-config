@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  action-pins:
+    # This repository dogfoods its own check, but runs the script straight from
+    # the checked-out tree rather than calling verify-action-pins.yml: the
+    # reusable workflow fetches the action from main, so a change to the checker
+    # would be validated against the old copy of itself.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+      - run: python3 -m unittest discover -s verify-action-pins -t verify-action-pins
+
+      - run: python3 verify-action-pins/verify_action_pins.py .github
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # Calling the wrapper the way a consumer does, which the job above cannot, so
+  # a change that breaks adoption fails here rather than in someone else's repo.
+  # The checker revision is this PR's head: a consumer passes the SHA it pinned,
+  # and there is no default to fall back to.
+  action-pins-reusable:
+    uses: ./.github/workflows/verify-action-pins.yml
+    with:
+      checker-ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  presets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+      # Pinned to the same Renovate version the self-hosted workflow runs, so a
+      # preset that validates here cannot fail at runtime on a version skew.
+      - run: npx --yes --package renovate@43.257.6 renovate-config-validator --strict default.json public.json

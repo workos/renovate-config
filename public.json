@@ -16,13 +16,6 @@
   },
   "packageRules": [
     {
-      "matchManagers": [
-        "github-actions"
-      ],
-      "pinDigests": true,
-      "extractVersion": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
-    },
-    {
       "matchUpdateTypes": [
         "minor",
         "patch"
@@ -45,17 +38,16 @@
       "automerge": false
     },
     {
+      "description": "Keep GitHub Actions in their own group rather than the repo-wide 'minor and patch updates' group above. Digests and pins are handled by the base preset.",
       "matchManagers": [
         "github-actions"
       ],
       "matchUpdateTypes": [
         "minor",
-        "patch",
-        "digest",
-        "pinDigest"
+        "patch"
       ],
-      "groupName": "github actions non-major",
-      "groupSlug": "github-actions-non-major",
+      "groupName": "github-actions versions",
+      "groupSlug": "github-actions-versions",
       "automerge": true
     },
     {

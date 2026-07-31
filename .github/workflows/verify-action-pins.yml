@@ -1,0 +1,105 @@
+name: Verify action pins
+
+# Reusable wrapper around verify-action-pins/action.yml, so a consuming repo can
+# adopt the check with a short caller instead of a checkout + action pair:
+#
+#   jobs:
+#     action-pins:
+#       uses: workos/renovate-config/.github/workflows/verify-action-pins.yml@<sha>
+#       with:
+#         checker-ref: <sha>
+#
+# `checker-ref` is required because the implementation is a second checkout and
+# a reusable workflow cannot see the ref it was called with: `github.workflow_ref`
+# is the caller's, and `github.job_workflow_sha` is documented but arrives empty
+# in workflow expressions. Rather than default it to a branch, this asks for it,
+# so a caller cannot end up running unpinned code without having said so.
+#
+# Called on pull_request it reports as a normal status check, which is what makes
+# it usable as a required check and as an automerge gate: Renovate will not merge
+# a branch whose statuses are not green, so a pin whose release is younger than
+# `min-age-days` cannot land — and it turns green on its own once the release
+# ages, with no human step.
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        type: string
+        required: false
+        default: ".github"
+      base:
+        description: >-
+          Ref to diff against. Defaults to the PR base on pull_request events and
+          to empty (full scan) elsewhere.
+        type: string
+        required: false
+        default: ""
+      min-age-days:
+        type: string
+        required: false
+        default: "7"
+      allowlist:
+        type: string
+        required: false
+        default: ".github/action-pin-allowlist.yml"
+      checker-ref:
+        description: >-
+          Ref of workos/renovate-config to run the checker from. Required, and
+          deliberately so: the implementation is a second checkout, a reusable
+          workflow cannot see the ref it was called with, and every default this
+          could carry is a mutable one. Pass the same SHA you pinned this
+          workflow to; passing "main" is allowed but then says out loud that the
+          checker floats. To avoid saying it twice, use the composite action
+          directly instead (see the README).
+        type: string
+        required: true
+      require-immutable:
+        type: string
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # `required: true` still admits an empty string, and an empty ref checks
+      # out the default branch — the mutable code path this input exists to
+      # prevent. A gate that cannot say which code it is about to run stops.
+      - name: Require an explicit checker revision
+        shell: bash
+        env:
+          CHECKER_REF: ${{ inputs.checker-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CHECKER_REF" ]]; then
+            echo "::error::checker-ref is empty. Pass the SHA this workflow is" \
+              "pinned to, or 'main' to run the checker from the default branch."
+            exit 1
+          fi
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          # A PR-scoped run resolves `git merge-base HEAD <base>`, which needs
+          # history rather than the default single commit.
+          fetch-depth: 0
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          repository: workos/renovate-config
+          ref: ${{ inputs.checker-ref }}
+          path: .verify-action-pins
+          persist-credentials: false
+
+      - uses: ./.verify-action-pins/verify-action-pins
+        with:
+          paths: ${{ inputs.paths }}
+          base: ${{ inputs.base || (github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || '') }}
+          min-age-days: ${{ inputs.min-age-days }}
+          allowlist: ${{ inputs.allowlist }}
+          require-immutable: ${{ inputs.require-immutable }}
+          token: ${{ github.token }}

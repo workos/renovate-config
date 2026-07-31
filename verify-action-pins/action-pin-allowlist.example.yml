@@ -1,0 +1,16 @@
+# Copy to .github/action-pin-allowlist.yml in a consuming repository to exempt
+# an action from pin verification. One `owner/repo: reason` per line; the reason
+# is printed in the check output, so write it for whoever reads a failing run.
+#
+# Only two situations justify an entry:
+#   * the action publishes tags but no releases, so there is no publish
+#     timestamp to age against;
+#   * the action publishes no vX.Y.Z tag at all, so a pinned SHA can never be
+#     tag-anchored.
+#
+# Both mean we are trusting the action's own hygiene rather than verifying it,
+# which is worth a second look before adding a line here — an action that never
+# cuts a release is also one Renovate cannot age-gate.
+
+# dopplerhq/cli-action: only v3/v4 major tags upstream, no vX.Y.Z releases
+# rubygems/configure-rubygems-credentials: tags are not semver
