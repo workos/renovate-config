@@ -105,13 +105,25 @@ jobs:
           # Renovate, so bumps are manual).
           renovate-version: 43.257.6
           # Setting docker-volumes REPLACES the action's default value
-          # (/tmp:/tmp) rather than appending to it, so /tmp:/tmp is
-          # restated to keep Renovate's baseDir/cache under /tmp behaving
-          # as stock. (The config file is unaffected — the action mounts
-          # it separately at /github-action/.) The second mount drops the
+          # (/tmp:/tmp) rather than appending to it — and dropping that
+          # default is deliberate. The image ships a provisioned
+          # /tmp/containerbase (containerbase's tool-install root);
+          # bind-mounting the runner's /tmp over it shadows that
+          # directory, and containerbase then cannot write its tool dirs
+          # on the host mount:
+          #   Installing tool node@24.18.1...
+          #   EACCES: permission denied, mkdir '/tmp/containerbase/tool.init.d'
+          # That kills every lockfile update needing a dynamically
+          # installed tool — Renovate's own pnpm updateArtifacts (e.g.
+          # common/autoinstallers/lefthook/pnpm-lock.yaml, workos/workos
+          # #67775) and the in-container `install-tool node` used by
+          # postUpgradeTasks. Renovate's baseDir/cache live under the
+          # container's own /tmp instead; nothing on the runner reads
+          # them. (The config file is unaffected — the action mounts it
+          # separately at /github-action/.) The remaining mount drops the
           # Socket Firewall .npmrc into the container user's HOME, where
           # npm/pnpm spawned by postUpgradeTasks read it.
-          docker-volumes: "/tmp:/tmp;/tmp/renovate-home/.npmrc:/home/ubuntu/.npmrc"
+          docker-volumes: "/tmp/renovate-home/.npmrc:/home/ubuntu/.npmrc"
           # Extend the default env-regex to forward Socket Firewall vars
           # into the Docker container. Default only matches RENOVATE_*,
           # LOG_LEVEL, GITHUB_COM_TOKEN, NODE_OPTIONS, and proxy vars.
