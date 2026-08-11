@@ -1,0 +1,97 @@
+name: Auto-approve Renovate PRs
+
+# Reusable workflow: approves Renovate-authored dependency PRs so they can
+# satisfy branch-protection review requirements and the merge queue's
+# approval count without a human in the loop for routine updates.
+#
+# Because this approval substitutes for human review on an automerge path,
+# it verifies more than label presence:
+#   1. every renovate/patch|renovate/minor label was last applied by
+#      renovate[bot] itself — Renovate's own update-type declaration — not
+#      by a human or another bot (labels are writable by anyone with
+#      triage access);
+#   2. every commit on the head branch is authored by renovate[bot], or is
+#      the lockfile bot's follow-up commit touching only the Rush lockfile
+#      (defends against commits injected into the bot branch before
+#      automerge).
+#
+# Callers need:
+#   permissions:
+#     pull-requests: write
+#     contents: read
+#     issues: read
+
+on:
+  workflow_call:
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: read
+    if: >
+      github.event.pull_request.user.login == 'renovate[bot]' &&
+      (contains(github.event.pull_request.labels.*.name, 'renovate/patch')
+        || contains(github.event.pull_request.labels.*.name, 'renovate/minor'))
+    steps:
+      - name: Verify label provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          events=$(gh api "repos/$REPO/issues/$PR/timeline" --paginate \
+            --jq '[.[] | select(.event == "labeled" or .event == "unlabeled")
+                   | select(.label.name == "renovate/patch" or .label.name == "renovate/minor")
+                   | {event, label: .label.name, actor: .actor.login}]')
+          bad=$(echo "$events" | jq -r '
+            group_by(.label)
+            | map(last)
+            | map(select(.event == "labeled" and .actor != "renovate[bot]"))
+            | map(.label + " was last applied by " + .actor)
+            | join("; ")')
+          if [ -n "$bad" ]; then
+            echo "::error::Refusing to approve PR #$PR: $bad. Only renovate[bot]-applied update-type labels may drive auto-approval."
+            exit 1
+          fi
+          echo "Label provenance verified: update-type labels applied by renovate[bot]."
+
+      - name: Verify commit authorship
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          commits=$(gh api "repos/$REPO/pulls/$PR/commits" --paginate \
+            --jq '.[] | (.sha) + " " + (.author.login // "unknown")')
+          while read -r sha login; do
+            case "$login" in
+              "renovate[bot]")
+                ;;
+              "github-actions[bot]")
+                # The lockfile-update workflow commits as github-actions[bot]
+                # but only ever touches the Rush lockfile. Any other file in
+                # such a commit means changes were injected under that
+                # identity.
+                extra=$(gh api "repos/$REPO/commits/$sha" \
+                  --jq '.files[].filename' \
+                  | grep -v -E '^common/config/rush/(pnpm-lock\.yaml|repo-state\.json)$' || true)
+                if [ -n "$extra" ]; then
+                  echo "::error::Refusing to approve PR #$PR: commit $sha (github-actions[bot]) touches files beyond the Rush lockfile: $extra"
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "::error::Refusing to approve PR #$PR: commit $sha authored by '$login'. Only renovate[bot] and the lockfile bot may author commits on auto-approved PRs."
+                exit 1
+                ;;
+            esac
+          done <<< "$commits"
+          echo "Commit authorship verified."
+
+      - name: Approve PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr review "${{ github.event.pull_request.number }}" --approve --repo "${{ github.repository }}"
