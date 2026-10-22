@@ -42,6 +42,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+
       - name: Setup Socket Firewall
         uses: workos/setup-socket-firewall@ca93dd8aa351f54f4729fe3377a9be23c631c25d
         with:
