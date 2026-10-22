@@ -50,4 +50,4 @@ jobs:
 
       # Pinned to the same Renovate version the self-hosted workflow runs, so a
       # preset that validates here cannot fail at runtime on a version skew.
-      - run: npx --yes --package renovate@43.257.6 renovate-config-validator --strict default.json public.json
+      - run: npx --yes --package renovate@44.176.2 renovate-config-validator --strict default.json public.json
