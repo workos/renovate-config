@@ -103,7 +103,7 @@ jobs:
           # Renovate regression would be indistinguishable from a config
           # bug. Bump deliberately (this repo is not self-managed by
           # Renovate, so bumps are manual).
-          renovate-version: 43.257.6
+          renovate-version: 44.176.2
           # Setting docker-volumes REPLACES the action's default value
           # (/tmp:/tmp) rather than appending to it — and dropping that
           # default is deliberate. The image ships a provisioned
