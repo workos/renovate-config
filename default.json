@@ -5,7 +5,9 @@
     "config:recommended",
     "helpers:pinGitHubActionDigestsToSemver"
   ],
-  "dependencyDashboard": false,
+  "dependencyDashboard": {
+    "enabled": false
+  },
   "minimumReleaseAge": "7 days",
   "minimumReleaseAgeBehaviour": "timestamp-required",
   "internalChecksFilter": "strict",

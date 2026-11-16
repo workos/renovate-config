@@ -4,7 +4,9 @@
   "extends": [
     "github>workos/renovate-config"
   ],
-  "dependencyDashboard": false,
+  "dependencyDashboard": {
+    "enabled": false
+  },
   "schedule": [
     "on the 15th day of the month before 12pm"
   ],
