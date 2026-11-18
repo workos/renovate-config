@@ -46,13 +46,21 @@ if (debugMode) {
 module.exports = {
   platform: "github",
 
-  // Explicit repo list — add repos here as they migrate from the
-  // Mend-hosted Renovate app to the self-hosted runner.
-  repositories: ["workos/workos"],
+  autodiscover: true,
+  autodiscoverFilter: JSON.parse(
+    process.env.RENOVATE_AUTODISCOVER_FILTER || '["workos/*"]'
+  ),
+  onboarding: true,
+  requireConfig: "required",
+  onboardingConfig: {
+    $schema: "https://docs.renovatebot.com/renovate-schema.json",
+    extends: ["github>workos/renovate-config"],
+  },
+  onboardingPrTitle: "Configure WorkOS Renovate dependency updates",
 
   // Commands that postUpgradeTasks may execute. Each entry is a
   // regex tested against the resolved command string.
-  allowedCommands: [
+  allowedCommands: process.env.RENOVATE_ALLOW_COMMANDS === "true" ? [
     // The slim renovate image has no npm on the exec PATH; install-tool
     // installs node+npm in-container so install-run-rush can bootstrap.
     // Pinned to an explicit version (not postUpgradeTasks.installTools)
@@ -63,7 +71,7 @@ module.exports = {
     // with its .nvmrc.
     "^install-tool node \\d+\\.\\d+\\.\\d+$",
     "^node common/scripts/install-run-rush\\.js update$",
-  ],
+  ] : [],
 
   // Per-command ceiling (minutes) for child processes Renovate execs,
   // postUpgradeTasks included. The default is 15; 20 gives a cold

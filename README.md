@@ -202,7 +202,7 @@ Repositories are managed by one of two Renovate runners:
 
 | Runner | Repos | `postUpgradeTasks` | Setup |
 |--------|-------|--------------------|-------|
-| **Self-hosted** (`.github/workflows/renovate.yml`) | Listed in `.github/renovate-global-config.js` | Yes | See below |
+| **Self-hosted** (`.github/workflows/renovate.yml`) | Auto-discovered from the WorkOS App installation | Yes | See below |
 | **Mend Renovate GitHub App** | All other repos | No | [Install the app](https://github.com/apps/renovate) |
 
 ### Self-hosted runner
@@ -211,7 +211,7 @@ The self-hosted runner is a scheduled GitHub Actions workflow in this repository
 
 **Configuration:**
 - `.github/workflows/renovate.yml` — the workflow definition (schedule, runner, auth)
-- `.github/renovate-global-config.js` — self-hosted global config (repo list, allowed commands)
+- `.github/renovate-global-config.js` — self-hosted global config (autodiscovery, onboarding, allowed commands)
 
 **Required secrets (in this repo's Actions settings):**
 - `RENOVATE_APP_PRIVATE_KEY` — private key for the GitHub App used by the runner
@@ -219,12 +219,14 @@ The self-hosted runner is a scheduled GitHub Actions workflow in this repository
 - `SOCKET_FIREWALL_TOKEN` — token for the Socket Firewall npm registry proxy
 
 **Adding a repo to the self-hosted runner:**
-1. Add the repo to `repositories` in `.github/renovate-global-config.js`
-2. Remove the repo from the Mend Renovate GitHub App's installation (Settings → Integrations → GitHub Apps → Renovate → Configure → deselect the repo)
+1. An org admin must install the self-hosted Renovate GitHub App on **all WorkOS repositories**. The runner discovers installation repositories automatically and opens an onboarding PR extending the default preset when configuration is missing.
+2. Before the self-hosted runner picks up a repo, remove it from the Mend Renovate GitHub App's installation (Settings → Integrations → GitHub Apps → Renovate → Configure → deselect the repo). Two runners managing the same branches can race and overwrite each other's work.
 3. If the repo needs post-upgrade commands, add the command regex to `allowedCommands` in the global config and add `postUpgradeTasks` to the repo's `renovate.json`
 
 **Manual trigger:**
 The workflow supports `workflow_dispatch` with optional dry-run and log-level inputs for testing.
+
+The matrix isolates `workos/workos` in its own 60-minute job for `rush update`; the other leg discovers all remaining WorkOS repositories. Dispatch with `verify_install: true` to print installation access totals, private-repository count, and up to ten private repository names other than `workos/workos`, without checking out code or running Renovate. The App is not yet installed org-wide; until it is, autodiscovery only finds repositories the App is currently installed on.
 
 ### Mend Renovate GitHub App
 
