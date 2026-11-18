@@ -33,11 +33,13 @@ jobs:
           DEVIN_ORG_ID: ${{ secrets.DEVIN_ORG_ID }}
           PR: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           REVIEW_CONTEXT: ${{ inputs.review-context }}
         run: |
           set -euo pipefail
-          sig=$(printf '%s' "$PR_TITLE" | sha256sum | cut -c1-12)
+          version_set=$(printf '%s\n' "$PR_BODY" | awk '/^\|/ {print}')
+          sig=$(printf '%s' "${version_set:-$PR_TITLE}" | sha256sum | cut -c1-12)
           marker="<!-- renovate-changelog-review:$sig -->"
           existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
             --jq ".[] | select(.user.login == \"github-actions[bot]\") | select(.body | contains(\"$marker\")) | .id")

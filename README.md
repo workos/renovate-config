@@ -220,7 +220,7 @@ jobs:
 name: Review Renovate changelogs
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, edited]
 jobs:
   review:
     permissions:
