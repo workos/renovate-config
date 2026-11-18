@@ -226,7 +226,7 @@ The self-hosted runner is a scheduled GitHub Actions workflow in this repository
 **Manual trigger:**
 The workflow supports `workflow_dispatch` with optional dry-run and log-level inputs for testing.
 
-The matrix isolates `workos/workos` in its own 60-minute job for `rush update`; the other leg discovers all remaining WorkOS repositories. Dispatch with `verify_install: true` to print installation access totals, private-repository count, and up to ten private repository names other than `workos/workos`, without checking out code or running Renovate. An org admin reports the installation now covers all repositories; this diagnostic provides runtime evidence using the actual installation token.
+The matrix isolates `workos/workos` in its own 60-minute job for `rush update`; the other leg discovers all remaining WorkOS repositories. Dispatch with `verify_install: true` to print installation access totals, private-repository count, and up to ten private repository names other than `workos/workos`, without checking out code or running Renovate. The App is not yet installed org-wide; until it is, autodiscovery only finds repositories the App is currently installed on.
 
 ### Mend Renovate GitHub App
 
