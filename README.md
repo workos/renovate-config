@@ -196,6 +196,66 @@ The default preset disables minor (and major) updates for software dependencies.
 
 The `addLabels: ["renovate/minor"]` is required — without it the auto-approve workflow's label check will never match and PRs will sit without approval.
 
+## Gated minor updates
+
+Use `github>workos/renovate-config:gated` **only after installing all three caller workflows**: auto-approve, changelog review, and needs-human escalation. This opt-in preset enables automerged software minor updates, grouped per dependency and labeled `renovate/minor`; it inherits the default age and schedule protections.
+
+The auto-approve reusable workflow may land separately; ensure `.github/workflows/auto-approve-renovate.yml` exists before adopting. Pin each reusable workflow to a reviewed full SHA. Create these three files in the consuming repository:
+
+```yaml
+# .github/workflows/renovate-auto-approve.yml
+name: Auto-approve Renovate
+on:
+  pull_request_target:
+    types: [opened, labeled, synchronize]
+jobs:
+  approve:
+    permissions:
+      pull-requests: write
+    uses: workos/renovate-config/.github/workflows/auto-approve-renovate.yml@<sha>
+```
+
+```yaml
+# .github/workflows/renovate-changelog-review.yml
+name: Review Renovate changelogs
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
+jobs:
+  review:
+    permissions:
+      pull-requests: write
+    uses: workos/renovate-config/.github/workflows/renovate-changelog-review.yml@<sha>
+    with:
+      review-context: "Inspect this repository's CSS imports, cascade layers, and component usages."
+    secrets:
+      DEVIN_API_TOKEN: ${{ secrets.DEVIN_API_TOKEN }}
+      DEVIN_ORG_ID: ${{ secrets.DEVIN_ORG_ID }}
+```
+
+```yaml
+# .github/workflows/renovate-needs-human.yml
+name: Escalate Renovate blockers
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  escalate:
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    uses: workos/renovate-config/.github/workflows/renovate-needs-human.yml@<sha>
+    with:
+      slack-enabled: true
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPENDENCY_MANAGEMENT_WEBHOOK_URL }}
+```
+
+Omit the Slack input and secret to label blockers without sending Slack. Configure Devin access to the consuming repository; `DEVIN_API_TOKEN` and `DEVIN_ORG_ID` are caller-provided secrets for the Devin v3 organization sessions API. Optional `review-context` replaces monorepo-specific assumptions with the repository's own architecture and testing guidance.
+
+The changelog review is **asynchronous and advisory**, not a required merge check: it can finish after CI. Only a high-confidence blocker causes Devin to start its comment with `<!-- renovate-needs-human -->`. Escalation accepts that marker only from `devin-ai-integration[bot]` on a `renovate[bot]` PR, adds `renovate/blocked`, disables GitHub auto-merge, and removes `aviator/merge` when present. A human clears the label after review. Configure your merge queue/required checks to reject `renovate/blocked`; a label alone does not prevent Renovate or another queue from re-enabling merge. Writes with `GITHUB_TOKEN` do not trigger other workflows, so any label-based required check must be refreshed explicitly by your repository's integration. This preset does not guarantee review completes before merge.
+
 ## Prerequisites
 
 Repositories are managed by one of two Renovate runners:
