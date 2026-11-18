@@ -17,6 +17,10 @@ on:
     - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
+      verify_install:
+        description: "List installation repository access without running Renovate"
+        type: boolean
+        default: false
       dry-run:
         description: "Dry-run mode: 'full' executes everything including in-container postUpgradeTasks but commits/pushes nothing; 'lookup' does dependency extraction + version lookups only (no branches, no PRs); empty string runs normally."
         type: choice
@@ -33,15 +37,22 @@ on:
           - debug
         default: info
 
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
 jobs:
   renovate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scope: monorepo
+            filter: '["workos/workos"]'
+          - scope: other-repos
+            filter: '["workos/*", "!workos/workos"]'
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.scope }}
+      cancel-in-progress: false
     # The half-hour cron firing only proceeds in debug mode; the on-the-
     # hour firing and manual dispatches always run.
     if: >-
@@ -60,11 +71,24 @@ jobs:
           app-id: ${{ vars.RENOVATE_APP_ID }}
           private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
           owner: workos
-          repositories: workos
+
+      - name: Verify installation repository access
+        if: inputs.verify_install
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api /installation/repositories --paginate --slurp | jq '{
+            total_count: .[0].total_count,
+            private_count: ([.[].repositories[] | select(.private)] | length),
+            private_examples: ([.[].repositories[] | select(.private and .full_name != "workos/workos") | .full_name] | .[:10])
+          }'
 
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+        if: ${{ !inputs.verify_install }}
 
       - name: Write Socket Firewall .npmrc for postUpgradeTasks
+        if: ${{ !inputs.verify_install }}
         env:
           TOKEN: ${{ secrets.SOCKET_FIREWALL_TOKEN }}
         run: |
@@ -95,6 +119,7 @@ jobs:
           chmod 644 /tmp/renovate-home/.npmrc
 
       - uses: renovatebot/github-action@6d859fc95779be83a0335ca704879b47e5d79641  # v46.1.16
+        if: ${{ !inputs.verify_install }}
         with:
           configurationFile: .github/renovate-global-config.js
           token: ${{ steps.app-token.outputs.token }}
@@ -129,6 +154,7 @@ jobs:
           # LOG_LEVEL, GITHUB_COM_TOKEN, NODE_OPTIONS, and proxy vars.
           env-regex: "^(?:RENOVATE_\\w+|LOG_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|(?:HTTPS?|NO)_PROXY|(?:https?|no)_proxy|NPM_CONFIG_REGISTRY|SOCKET_FIREWALL_TOKEN)$"
         env:
+          RENOVATE_AUTODISCOVER_FILTER: ${{ matrix.filter }}
           RENOVATE_DRY_RUN: ${{ inputs.dry-run }}
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
           # Socket Firewall: postUpgradeTasks (rush update) needs these
