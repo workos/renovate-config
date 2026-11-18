@@ -1,0 +1,37 @@
+name: Auto-approve Renovate PRs
+
+on:
+  workflow_call:
+
+permissions:
+  pull-requests: write
+
+jobs:
+  auto-approve:
+    if: >-
+      github.event.pull_request.user.login == 'renovate[bot]' &&
+      (contains(github.event.pull_request.labels.*.name, 'renovate/patch') ||
+       contains(github.event.pull_request.labels.*.name, 'renovate/minor')) &&
+      !contains(github.event.pull_request.labels.*.name, 'renovate/major') &&
+      !contains(github.event.pull_request.labels.*.name, 'renovate/blocked')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check every commit author and approve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          commits=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --paginate --slurp)
+          if ! jq -e 'add | length > 0 and all(.[]; .author.login == "renovate[bot]")' <<< "$commits" >/dev/null; then
+            echo "Non-Renovate or unknown commit author: human review required."
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews" --paginate \
+              --jq '.[] | select(.state == "APPROVED" and .user.login == "github-actions[bot]") | .id' \
+              | while read -r review; do
+                  gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews/$review/dismissals" \
+                    -f message="Non-Renovate commits require human review."
+                done
+            exit 0
+          fi
+          gh pr review "$PR" --approve --repo "$GITHUB_REPOSITORY"

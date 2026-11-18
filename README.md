@@ -104,17 +104,19 @@ Repos that use Aviator as their merge queue require an additional step, because 
 name: Auto-approve Renovate PRs
 
 on:
-  pull_request:
-    types: [opened, labeled]
+  pull_request_target:
+    types: [opened, labeled, synchronize]
 
 jobs:
   auto-approve:
-    uses: workos/renovate-config/.github/workflows/auto-approve-renovate.yml@main
+    uses: workos/renovate-config/.github/workflows/auto-approve-renovate.yml@<sha>
     permissions:
       pull-requests: write
 ```
 
 This workflow approves any PR opened by `renovate[bot]` that carries the `renovate/patch` or `renovate/minor` label, satisfying Aviator's approval precondition. Aviator then queues the PR once CI passes.
+
+Replace `<sha>` with a reviewed full commit SHA. Use `pull_request_target` so the gate runs from the trusted base branch; it never checks out PR code. Every commit must also be authored by `renovate[bot]`: human, agent, and unknown authors require human review. On synchronize, any stale approval from this automation is dismissed. Major or blocked PRs are not approved.
 
 ## Verifying action pins
 
