@@ -12,6 +12,7 @@ on:
         required: false
 
 permissions:
+  contents: write
   pull-requests: write
   issues: write
 
@@ -39,7 +40,10 @@ jobs:
           gh label create renovate/blocked --repo "$GITHUB_REPOSITORY" \
             --color B60205 --description "Dependency update requires human review" --force
           gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label renovate/blocked
-          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto
+          auto_merge=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.auto_merge')
+          if [ "$auto_merge" != "null" ]; then
+            gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto
+          fi
           labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name')
           if [[ "$labels" == *'aviator/merge'* ]]; then
             gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label aviator/merge

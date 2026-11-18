@@ -242,6 +242,7 @@ on:
 jobs:
   escalate:
     permissions:
+      contents: write
       pull-requests: write
       issues: write
     uses: workos/renovate-config/.github/workflows/renovate-needs-human.yml@<sha>
