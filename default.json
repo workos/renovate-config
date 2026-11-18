@@ -6,7 +6,8 @@
     "helpers:pinGitHubActionDigestsToSemver"
   ],
   "dependencyDashboard": {
-    "enabled": false
+    "enabled": true,
+    "title": "Dependency Dashboard"
   },
   "minimumReleaseAge": "7 days",
   "minimumReleaseAgeBehaviour": "timestamp-required",
@@ -47,16 +48,26 @@
       "addLabels": ["renovate/patch"]
     },
     {
-      "description": "Do not open major GitHub Actions updates. Major action bumps often carry breaking changes and must be performed manually.",
+      "description": "Track major GitHub Actions updates in the dashboard until a human requests a PR.",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "automerge": false,
+      "addLabels": ["renovate/major"]
+    },
+    {
+      "description": "Keep software minor updates disabled by default.",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["minor"],
       "enabled": false
     },
     {
-      "description": "Disable major and minor updates for software dependencies — patch-only policy.",
+      "description": "Track software major updates in the dashboard until a human requests a PR.",
       "matchManagers": ["!github-actions"],
-      "matchUpdateTypes": ["major", "minor"],
-      "enabled": false
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "automerge": false,
+      "addLabels": ["renovate/major"]
     },
     {
       "description": "Automerge patch updates for software dependencies after minimum release age. Group by dependency name so monorepos with version-consistency policies (e.g. Rush) get a single PR per dependency across all packages.",

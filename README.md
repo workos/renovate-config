@@ -21,9 +21,9 @@ The base preset that all WorkOS repositories can extend. It implements supply-ch
 - **Enforces a 7-day minimum release age** (`minimumReleaseAge: "7 days"`). New action releases are not eligible for auto-update until they have been published for 7+ days.
 - **Treats missing release timestamps as "not yet eligible"** (`minimumReleaseAgeBehaviour: "timestamp-required"`) — the safer default introduced in Renovate 42.
 - **Suppresses branches for not-yet-eligible updates** (`internalChecksFilter: "strict"`) so the inbox stays quiet. A version update does not open a PR until it has already cleared the 7 days; the wait happens before PR creation, not in a pending check on an open PR.
-- **Groups and auto-merges minor/patch GitHub Actions updates** after CI passes, in `github-actions versions`. Major updates are not opened at all.
+- **Groups and auto-merges minor/patch GitHub Actions updates** after CI passes, in `github-actions versions`. Major updates wait for dashboard approval.
 - **Does not open bare digest re-points** (same tag, new commit). See [GitHub Actions update policy](#github-actions-update-policy).
-- **Patch-only policy for software dependencies by default** — minor and major dependency updates are disabled in the base preset. Patch updates are auto-merged after CI passes and the 7-day minimum age is met. Patch PRs are labeled `renovate/patch` at creation time. Consuming repos can override this to enable minor updates (see [Enabling minor updates](#enabling-minor-updates)).
+- **Patch-only automatic PRs for software dependencies** — minor updates stay disabled; majors are tracked in the Dependency Dashboard without opening PRs until requested. Patch updates are auto-merged after CI passes and the 7-day minimum age is met, with `renovate/patch` labels. See [Enabling minor updates](#enabling-minor-updates).
 - **Groups patch updates by dependency name** — all packages that use the same dependency are updated in a single PR. This ensures monorepos with version-consistency policies (e.g. Rush) pass lockfile validation. For single-package repos this is a no-op.
 - **After-hours schedule** — Renovate only runs outside business hours for both US coasts: weekdays 9 PM–7 AM Eastern (6 PM–4 AM Pacific), and all day on weekends. The weekend window closes at 7 AM ET Monday.
 - **Security/vulnerability PRs follow the same schedule** — Renovate's built-in default creates vulnerability-fix PRs immediately (`schedule: []`), bypassing any configured schedule. This preset overrides that default so security PRs are only opened during the same after-hours window as regular updates.
@@ -51,7 +51,7 @@ The preset therefore splits actions updates into four buckets:
 | `minor` / `patch` (semver tag) | 7-day age gate, grouped in `github-actions versions`, automerged | The tag has a release timestamp, so the age gate is real |
 | `pin` / `pinDigest` | No age gate, grouped in `github-actions pins`, automerged | Pinning freezes the SHA the floating tag already resolves to — no new code |
 | `digest` (tag re-pointed to a new commit) | Not opened | No timestamp to age against; automerging would merge a commit of unknown age, which is the tag-hijack shape SHA pinning exists to defend against |
-| `major` | Not opened | Breaking changes; bump manually |
+| `major` | Dashboard approval required | Breaking changes; request a PR when ready |
 
 Consequences worth knowing:
 
@@ -173,9 +173,13 @@ Workflows are parsed as YAML rather than pattern-matched line by line, so every 
 
 First-party `workos/*` references are skipped: they're covered by this check in the repository that owns them, and demanding a SHA for `workos/actions/...@main` would relocate the trust decision rather than strengthen it.
 
+## Tracking major updates
+
+The default preset opens a **Dependency Dashboard** issue listing available major updates. Check an update's approval box to request its PR (normal release-age and schedule restrictions still apply). These PRs carry `renovate/major` and never automerge. Public repositories keep receiving major PRs directly, without dashboard approval. Repository-local `enabled: false` holds still take precedence; dashboard approval does not re-enable held dependencies.
+
 ## Enabling minor updates
 
-The default preset disables minor (and major) updates for software dependencies. To opt in to automerged minor updates in a consuming repo, add a `packageRules` entry that re-enables them **and** labels the PRs so the auto-approve workflow fires:
+The default preset disables minor updates for software dependencies. To opt in to automerged minor updates in a consuming repo, add a `packageRules` entry that re-enables them **and** labels the PRs so the auto-approve workflow fires:
 
 ```json
 {
