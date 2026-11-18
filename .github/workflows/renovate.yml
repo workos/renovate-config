@@ -48,8 +48,12 @@ jobs:
         include:
           - scope: monorepo
             filter: '["workos/workos"]'
+            allow-commands: true
+            repositories: workos
           - scope: other-repos
             filter: '["workos/*", "!workos/workos"]'
+            allow-commands: false
+            repositories: ""
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.scope }}
       cancel-in-progress: false
@@ -71,6 +75,7 @@ jobs:
           app-id: ${{ vars.RENOVATE_APP_ID }}
           private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
           owner: workos
+          repositories: ${{ matrix.repositories }}
 
       - name: Verify installation repository access
         if: inputs.verify_install
@@ -155,6 +160,7 @@ jobs:
           env-regex: "^(?:RENOVATE_\\w+|LOG_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|(?:HTTPS?|NO)_PROXY|(?:https?|no)_proxy|NPM_CONFIG_REGISTRY|SOCKET_FIREWALL_TOKEN)$"
         env:
           RENOVATE_AUTODISCOVER_FILTER: ${{ matrix.filter }}
+          RENOVATE_ALLOW_COMMANDS: ${{ matrix.allow-commands }}
           RENOVATE_DRY_RUN: ${{ inputs.dry-run }}
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
           # Socket Firewall: postUpgradeTasks (rush update) needs these

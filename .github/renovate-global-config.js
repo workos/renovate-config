@@ -60,7 +60,7 @@ module.exports = {
 
   // Commands that postUpgradeTasks may execute. Each entry is a
   // regex tested against the resolved command string.
-  allowedCommands: [
+  allowedCommands: process.env.RENOVATE_ALLOW_COMMANDS === "true" ? [
     // The slim renovate image has no npm on the exec PATH; install-tool
     // installs node+npm in-container so install-run-rush can bootstrap.
     // Pinned to an explicit version (not postUpgradeTasks.installTools)
@@ -71,7 +71,7 @@ module.exports = {
     // with its .nvmrc.
     "^install-tool node \\d+\\.\\d+\\.\\d+$",
     "^node common/scripts/install-run-rush\\.js update$",
-  ],
+  ] : [],
 
   // Per-command ceiling (minutes) for child processes Renovate execs,
   // postUpgradeTasks included. The default is 15; 20 gives a cold
