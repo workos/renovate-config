@@ -1,0 +1,64 @@
+name: Escalate Renovate blockers
+
+on:
+  workflow_call:
+    inputs:
+      slack-enabled:
+        description: "Send a Slack webhook notification after labeling the PR"
+        type: boolean
+        default: false
+    secrets:
+      SLACK_WEBHOOK_URL:
+        required: false
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  needs-human:
+    if: >-
+      github.event.issue.pull_request != null &&
+      github.event.comment.user.login == 'devin-ai-integration[bot]' &&
+      startsWith(github.event.comment.body, '<!-- renovate-needs-human -->')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify Renovate author and label blocker
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          author=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.user.login')
+          if [ "$author" != 'renovate[bot]' ]; then
+            echo "Not a Renovate PR — skipping."
+            exit 0
+          fi
+          gh label create renovate/blocked --repo "$GITHUB_REPOSITORY" \
+            --color B60205 --description "Dependency update requires human review" --force
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label renovate/blocked
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name')
+          if [[ "$labels" == *'aviator/merge'* ]]; then
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label aviator/merge
+          fi
+          echo "blocked=true" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack
+        if: steps.pr.outputs.blocked == 'true' && inputs.slack-enabled
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_URL: ${{ github.event.issue.html_url }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "::error::slack-enabled requires SLACK_WEBHOOK_URL"
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg url "$PR_URL" --arg summary "${COMMENT_BODY:0:1500}" \
+              '{text: ("Renovate PR needs human review: " + $url + "\n" + $summary)}')"

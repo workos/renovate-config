@@ -1,0 +1,17 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Opt-in automerged minor updates with advisory changelog review and human escalation workflows. Install all three caller workflows before adopting.",
+  "extends": ["github>workos/renovate-config"],
+  "packageRules": [
+    {
+      "description": "Enable and automerge minor software updates, grouped by dependency name and labeled for auto-approval.",
+      "matchManagers": ["!github-actions"],
+      "matchUpdateTypes": ["minor"],
+      "enabled": true,
+      "automerge": true,
+      "groupName": "{{{depName}}}",
+      "groupSlug": "{{{depNameSanitized}}}",
+      "addLabels": ["renovate/minor"]
+    }
+  ]
+}
